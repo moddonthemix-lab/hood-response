@@ -72,8 +72,15 @@ export interface Swarm {
   /** For rotation swarms, the token being rotated into. */
   rotatedIntoSymbol?: string;
   walletCount: number;
+  /** Addresses are retained for engine logic (rotation matching) but are not
+   *  surfaced in alerts or the dashboard — see `walletSummary` for display. */
   wallets: string[];
+  /** Privacy-preserving makeup for display, e.g. "2 smart-money · 1 whale". */
+  walletSummary: string;
   totalUsd: number;
+  /** Token market cap (USD) at the moment of the swarm — the cap the wallets
+   *  bought or sold into. */
+  marketCap: number;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

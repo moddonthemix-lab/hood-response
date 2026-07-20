@@ -91,7 +91,7 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
 
   <section class="card full">
     <h2>Tracked Wallets <span class="mono" id="wallet-count"></span></h2>
-    <div class="body"><table id="wallets"><thead><tr><th>Address</th><th>Label</th><th>Category</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
+    <div class="body"><table id="wallets"><thead><tr><th>Label</th><th>Category</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
   </section>
 </main>
 
@@ -105,11 +105,13 @@ const time = (t) => new Date(t).toLocaleTimeString();
 function cap(el, max){ while(el.children.length>max) el.removeChild(el.lastChild); }
 function clearEmpty(el){ const e=el.querySelector('.empty'); if(e) e.remove(); }
 
+const mcLabel = (s) => (s.kind==='SELL' ? 'sold @ ' : 'bought @ ') + usd(s.marketCap) + ' MC';
+
 function feedRow(s){
   const d=document.createElement('div'); d.className='row flash';
   d.innerHTML='<span class="tag '+s.direction+'">'+s.direction+'</span>'+
     '<span class="sym">'+s.tokenSymbol+'</span>'+
-    '<span class="grow mono">'+short(s.wallet)+'</span>'+
+    '<span class="grow mono">tracked wallet</span>'+
     '<span class="usd">'+usd(s.usdValue)+'</span>'+
     '<span class="mono">'+time(s.timestamp)+'</span>';
   return d;
@@ -119,7 +121,7 @@ function swarmRow(s){
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+
     '<span class="sym">'+s.tokenSymbol+into+'</span>'+
-    '<span class="grow mono">'+s.walletCount+' wallets · '+s.windowSeconds+'s</span>'+
+    '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
   return d;
@@ -129,7 +131,7 @@ function alertRow(a){
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+
     '<span class="sym">'+s.tokenSymbol+into+'</span>'+
-    '<span class="grow mono">'+a.ruleName+' · '+s.walletCount+' wallets</span>'+
+    '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
     '<span class="mono">'+time(a.createdAt)+'</span>';
   return d;
@@ -149,7 +151,7 @@ async function loadTables(){
   $('wallet-count').textContent=wallets.length+' tracked';
   const wb=$('wallets').querySelector('tbody'); wb.innerHTML='';
   for(const w of wallets){ const s=w.stats||{buys:0,sells:0}; const tr=document.createElement('tr');
-    tr.innerHTML='<td class="mono">'+short(w.address)+'</td><td>'+w.label+'</td><td class="mono">'+w.category+'</td><td class="num">'+w.confidence.toFixed(2)+'</td><td class="num">'+(s.buys||0)+'</td><td class="num">'+(s.sells||0)+'</td>';
+    tr.innerHTML='<td>'+w.label+'</td><td class="mono">'+w.category+'</td><td class="num">'+w.confidence.toFixed(2)+'</td><td class="num">'+(s.buys||0)+'</td><td class="num">'+(s.sells||0)+'</td>';
     wb.appendChild(tr); }
 }
 

@@ -22,6 +22,8 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
 | **Conviction score** | 0–100 from wallet quality, count, capital, velocity, liquidity, market cap, historical accuracy, buy/sell ratio |
+| **Market cap context** | every swarm/alert reports the token market cap it was bought/sold into |
+| **Address privacy** | wallet addresses are never surfaced in alerts, the dashboard, or the API feeds/SSE — only wallet counts and a category makeup (e.g. "3 smart-money · 1 whale") are shown |
 | **Configurable rules** | min wallets, time window, min USD, min conviction, cooldown, kinds, ignored tokens/wallets, ignore dust, ignore stablecoins, ignore duplicate wallets |
 | **Notifications** | Discord webhook, Telegram bot, generic REST webhook (each optional) |
 | **Live dashboard** | self-contained page at `/` — live feed, swarms, alerts, leaderboards, tracked wallets, latency/health, updated over SSE |

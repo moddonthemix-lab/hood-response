@@ -129,13 +129,14 @@ export class Aggregator {
     const lastSeen = Math.max(...timestamps);
     const windowSeconds = Math.max((lastSeen - firstSeen) / 1000, 0.001);
 
+    const marketCap = this.price.marketCap(token);
     const { score, breakdown } = computeConviction({
       wallets: walletObjs,
       swaps: events,
       token,
       windowSeconds,
       totalUsd,
-      marketCap: this.price.marketCap(token),
+      marketCap,
     });
 
     return {
@@ -145,7 +146,9 @@ export class Aggregator {
       tokenSymbol: token.symbol,
       walletCount: wallets.length,
       wallets,
+      walletSummary: summarizeWallets(walletObjs, wallets.length),
       totalUsd,
+      marketCap,
       conviction: score,
       convictionBreakdown: breakdown,
       windowSeconds: Number(windowSeconds.toFixed(2)),
@@ -153,4 +156,35 @@ export class Aggregator {
       lastSeen,
     };
   }
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  internal: 'smart-money',
+  vc: 'VC',
+  whale: 'whale',
+  market_maker: 'market-maker',
+  influencer: 'influencer',
+  developer: 'dev',
+  retail: 'retail',
+  unknown: 'wallet',
+};
+
+/**
+ * Build a privacy-preserving makeup string from wallet categories, e.g.
+ * "2 smart-money · 1 whale · 1 retail" — no addresses are exposed.
+ */
+function summarizeWallets(
+  wallets: { category: string }[],
+  total: number,
+): string {
+  if (wallets.length === 0) return `${total} tracked`;
+  const counts = new Map<string, number>();
+  for (const w of wallets) {
+    const label = CATEGORY_LABEL[w.category] ?? 'wallet';
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, n]) => `${n} ${label}`)
+    .join(' · ');
 }

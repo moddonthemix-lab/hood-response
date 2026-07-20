@@ -12,10 +12,6 @@ export function usd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-export function shortAddr(a: string): string {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`;
-}
-
 export function headline(s: Swarm): string {
   const e = KIND_EMOJI[s.kind];
   if (s.kind === 'ROTATION') {
@@ -27,13 +23,15 @@ export function headline(s: Swarm): string {
 
 /** Plain-text alert body shared by Telegram + generic webhooks. */
 export function textBody(s: Swarm): string {
+  const action = s.kind === 'SELL' ? 'Sold at MC' : 'Bought at MC';
   const lines = [
     headline(s),
     ``,
     `Conviction: ${s.conviction}/100`,
     `Notional: ${usd(s.totalUsd)}`,
+    `${action}: ${usd(s.marketCap)}`,
     `Window: ${s.windowSeconds}s`,
-    `Wallets: ${s.wallets.map(shortAddr).join(', ')}`,
+    `Wallets: ${s.walletSummary}`,
   ];
   return lines.join('\n');
 }

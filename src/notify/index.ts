@@ -1,7 +1,7 @@
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { NotificationDelivery, Swarm } from '../types.js';
-import { KIND_EMOJI, headline, shortAddr, textBody, usd } from './format.js';
+import { KIND_EMOJI, headline, textBody, usd } from './format.js';
 
 const TIMEOUT_MS = 4000;
 
@@ -28,11 +28,13 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
     fields: [
       { name: 'Conviction', value: `${s.conviction}/100`, inline: true },
       { name: 'Notional', value: usd(s.totalUsd), inline: true },
-      { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
       {
-        name: `Wallets (${s.walletCount})`,
-        value: s.wallets.map(shortAddr).join(', ').slice(0, 1024),
+        name: s.kind === 'SELL' ? 'Sold at MC' : 'Bought at MC',
+        value: usd(s.marketCap),
+        inline: true,
       },
+      { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
+      { name: `Wallets (${s.walletCount})`, value: s.walletSummary, inline: true },
     ],
     footer: { text: 'Swarm the Fly · Robinhood Chain' },
     timestamp: new Date(s.lastSeen).toISOString(),
