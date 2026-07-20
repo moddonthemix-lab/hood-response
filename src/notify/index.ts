@@ -2,7 +2,6 @@ import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { NotificationDelivery, Swarm } from '../types.js';
 import { KIND_EMOJI, headline, textBody, usd } from './format.js';
-import { dexScreenerUrl } from '../links.js';
 
 const TIMEOUT_MS = 4000;
 
@@ -23,23 +22,22 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 
 async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery> {
   const color = s.kind === 'BUY' ? 0x16a34a : s.kind === 'SELL' ? 0xdc2626 : 0x7c3aed;
-  const dexUrl = dexScreenerUrl(s.token);
   const embed = {
     title: headline(s),
-    url: dexUrl, // makes the title a clickable DexScreener link
+    url: s.dexUrl, // makes the title a clickable DexScreener link
     color,
     fields: [
       { name: 'Conviction', value: `${s.conviction}/100`, inline: true },
       { name: 'Notional', value: usd(s.totalUsd), inline: true },
       {
         name: s.kind === 'SELL' ? 'Sold at MC' : 'Bought at MC',
-        value: usd(s.marketCap),
+        value: `${usd(s.marketCap)}${s.priceLive ? '' : ' (est)'}`,
         inline: true,
       },
       { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
       { name: `Wallets (${s.walletCount})`, value: s.walletSummary, inline: true },
       ...(s.newToken ? [{ name: '🆕 Contract', value: s.token }] : []),
-      { name: 'Chart', value: `[DexScreener](${dexUrl})`, inline: true },
+      { name: 'Chart', value: `[DexScreener](${s.dexUrl})`, inline: true },
     ],
     footer: { text: 'Swarm the Fly · Robinhood Chain' },
     timestamp: new Date(s.lastSeen).toISOString(),

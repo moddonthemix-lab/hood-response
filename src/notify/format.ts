@@ -1,5 +1,4 @@
 import type { Swarm } from '../types.js';
-import { dexScreenerUrl } from '../links.js';
 
 export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   BUY: '🟢🪰',
@@ -26,17 +25,18 @@ export function headline(s: Swarm): string {
 /** Plain-text alert body shared by Telegram + generic webhooks. */
 export function textBody(s: Swarm): string {
   const action = s.kind === 'SELL' ? 'Sold at MC' : 'Bought at MC';
+  const mc = `${usd(s.marketCap)}${s.priceLive ? '' : ' (est)'}`;
   const lines = [
     headline(s),
     ``,
     `Conviction: ${s.conviction}/100`,
     `Notional: ${usd(s.totalUsd)}`,
-    `${action}: ${usd(s.marketCap)}`,
+    `${action}: ${mc}`,
     `Window: ${s.windowSeconds}s`,
     `Wallets: ${s.walletSummary}`,
   ];
   // For freshly discovered coins, surface the contract so it's actionable.
   if (s.newToken) lines.push(`Contract: ${s.token}`);
-  lines.push(`Chart: ${dexScreenerUrl(s.token)}`);
+  lines.push(`Chart: ${s.dexUrl}`);
   return lines.join('\n');
 }

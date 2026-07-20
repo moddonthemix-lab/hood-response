@@ -151,6 +151,8 @@ export class Aggregator {
       totalUsd,
       marketCap,
       newToken: token.discovered === true,
+      dexUrl: this.price.dexUrl(token.address),
+      priceLive: this.price.isLive(token.address),
       conviction: score,
       convictionBreakdown: breakdown,
       windowSeconds: Number(windowSeconds.toFixed(2)),
