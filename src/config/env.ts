@@ -77,6 +77,11 @@ const schema = z.object({
 
   DATABASE_URL: z.string().default(''),
   REDIS_URL: z.string().default(''),
+
+  // DexScreener deep links. Set DEXSCREENER_CHAIN to the chain slug (e.g. the
+  // Robinhood Chain slug) for direct token pages; left empty, links fall back to
+  // DexScreener's universal address search, which works on any chain.
+  DEXSCREENER_CHAIN: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

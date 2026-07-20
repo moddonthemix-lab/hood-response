@@ -38,6 +38,8 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .tag.ROTATION { background:#20132e; color:var(--violet); }
   .tag.NEW { background:#3a2a05; color:#f0b429; }
   .addr { color:var(--muted); font-size:11px; }
+  a.dex { color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent); }
+  a.dex:hover { color:#7dd3fc; }
   .newcard { border-color:#4a3607; box-shadow:0 0 0 1px #4a360733; }
   .newcard h2 { color:#f0b429; }
   .mono { color:var(--muted); font-size:12px; }
@@ -110,6 +112,9 @@ const short = (a) => a ? a.slice(0,6)+'…'+a.slice(-4) : '';
 const usd = (n) => n>=1e6 ? '$'+(n/1e6).toFixed(2)+'M' : n>=1e3 ? '$'+(n/1e3).toFixed(1)+'k' : '$'+(n||0).toFixed(2);
 const convClass = (c) => c>=70?'hi':c>=40?'mid':'lo';
 const time = (t) => new Date(t).toLocaleTimeString();
+let DEX_CHAIN=null;
+const dexUrl = (addr) => DEX_CHAIN ? 'https://dexscreener.com/'+DEX_CHAIN+'/'+addr : 'https://dexscreener.com/search?q='+addr;
+const dexLink = (addr,label) => '<a href="'+dexUrl(addr)+'" target="_blank" rel="noopener" class="dex">'+label+'</a>';
 
 function cap(el, max){ while(el.children.length>max) el.removeChild(el.lastChild); }
 function clearEmpty(el){ const e=el.querySelector('.empty'); if(e) e.remove(); }
@@ -131,7 +136,7 @@ function swarmRow(s){
   const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
-    '<span class="sym">'+s.tokenSymbol+into+'</span>'+
+    '<span class="sym">'+dexLink(s.token,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
@@ -141,7 +146,7 @@ function alertRow(a){
   const s=a.swarm; const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
-    '<span class="sym">'+s.tokenSymbol+into+'</span>'+
+    '<span class="sym">'+dexLink(s.token,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
     '<span class="mono">'+time(a.createdAt)+'</span>';
@@ -150,8 +155,8 @@ function alertRow(a){
 function newCoinRow(s){
   const d=document.createElement('div'); d.className='row flash';
   d.innerHTML='<span class="tag NEW">NEW</span>'+
-    '<span class="sym">'+s.tokenSymbol+'</span>'+
-    '<span class="grow addr" title="'+s.token+'">'+s.token+'</span>'+
+    '<span class="sym">'+dexLink(s.token,s.tokenSymbol)+'</span>'+
+    '<span class="grow addr" title="'+s.token+'">'+dexLink(s.token,s.token)+'</span>'+
     '<span class="mono">'+s.walletCount+'w · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
@@ -165,7 +170,7 @@ async function loadTables(){
   ]);
   const tb=$('tokens').querySelector('tbody'); tb.innerHTML='';
   for(const t of tokens){ const tr=document.createElement('tr');
-    tr.innerHTML='<td class="sym">'+(t.symbol||short(t.address))+'</td><td class="num">'+t.buys+'</td><td class="num">'+t.sells+'</td><td class="num">'+t.swarms+'</td>';
+    tr.innerHTML='<td class="sym">'+dexLink(t.address,(t.symbol||short(t.address)))+'</td><td class="num">'+t.buys+'</td><td class="num">'+t.sells+'</td><td class="num">'+t.swarms+'</td>';
     tb.appendChild(tr); }
   if(!tokens.length) tb.innerHTML='<tr><td colspan="4" class="empty">no activity yet</td></tr>';
 
@@ -186,6 +191,7 @@ function applyStats(m){
 }
 
 async function boot(){
+  try{ const cfg=await fetch('/api/config').then(r=>r.json()); DEX_CHAIN=cfg.dexscreenerChain||null; }catch(e){}
   const stats=await fetch('/api/stats').then(r=>r.json());
   $('m-swaps').textContent=stats.totals.swaps;
   $('m-swarms').textContent=stats.totals.swarms;

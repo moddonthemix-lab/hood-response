@@ -1,4 +1,5 @@
 import type { Swarm } from '../types.js';
+import { dexScreenerUrl } from '../links.js';
 
 export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   BUY: '🟢🪰',
@@ -36,5 +37,6 @@ export function textBody(s: Swarm): string {
   ];
   // For freshly discovered coins, surface the contract so it's actionable.
   if (s.newToken) lines.push(`Contract: ${s.token}`);
+  lines.push(`Chart: ${dexScreenerUrl(s.token)}`);
   return lines.join('\n');
 }
