@@ -10,6 +10,11 @@ export interface TrackedToken {
   totalSupply: number;
   /** True for stablecoins so they can be filtered when IGNORE_STABLECOINS. */
   stable?: boolean;
+  /** True when the token was auto-registered by discovery (not in the seed set).
+   *  Its metadata (symbol/supply) may be estimated until enriched from chain. */
+  discovered?: boolean;
+  /** When the token was first seen (unix ms). */
+  firstSeen?: number;
 }
 
 export type WalletCategory =
@@ -81,6 +86,9 @@ export interface Swarm {
   /** Token market cap (USD) at the moment of the swarm — the cap the wallets
    *  bought or sold into. */
   marketCap: number;
+  /** True when this swarm is on a token discovered by tracked wallets rather
+   *  than one from the original seed set — the early-discovery signal. */
+  newToken: boolean;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

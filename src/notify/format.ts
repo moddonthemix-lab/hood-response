@@ -17,8 +17,9 @@ export function headline(s: Swarm): string {
   if (s.kind === 'ROTATION') {
     return `${e} ROTATION — ${s.walletCount} wallets rotating ${s.tokenSymbol} → ${s.rotatedIntoSymbol}`;
   }
+  const tag = s.newToken ? '🆕 NEW COIN · ' : '';
   const verb = s.kind === 'BUY' ? 'accumulating' : 'dumping';
-  return `${e} SWARM — ${s.walletCount} wallets ${verb} ${s.tokenSymbol}`;
+  return `${e} ${tag}SWARM — ${s.walletCount} wallets ${verb} ${s.tokenSymbol}`;
 }
 
 /** Plain-text alert body shared by Telegram + generic webhooks. */
@@ -33,5 +34,7 @@ export function textBody(s: Swarm): string {
     `Window: ${s.windowSeconds}s`,
     `Wallets: ${s.walletSummary}`,
   ];
+  // For freshly discovered coins, surface the contract so it's actionable.
+  if (s.newToken) lines.push(`Contract: ${s.token}`);
   return lines.join('\n');
 }

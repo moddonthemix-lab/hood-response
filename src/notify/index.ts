@@ -35,6 +35,7 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
       },
       { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
       { name: `Wallets (${s.walletCount})`, value: s.walletSummary, inline: true },
+      ...(s.newToken ? [{ name: '🆕 Contract', value: s.token }] : []),
     ],
     footer: { text: 'Swarm the Fly · Robinhood Chain' },
     timestamp: new Date(s.lastSeen).toISOString(),

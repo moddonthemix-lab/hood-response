@@ -29,6 +29,8 @@ async function main(): Promise<void> {
 
   // Pipeline: chain → decoder → store → aggregator → alert engine → notify.
   const listener = createListener(store, price, (swap) => {
+    // Auto-register unknown tokens so brand-new coins flow through the pipeline.
+    store.ensureToken(swap.token, swap.tokenSymbol);
     store.recordSwap(swap);
     for (const swarm of aggregator.ingest(swap)) {
       store.recordSwarm(swarm);

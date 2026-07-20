@@ -18,6 +18,12 @@ export function topicToAddress(topic: string): string {
   return ('0x' + hex.slice(-40)).toLowerCase();
 }
 
+/** Left-pad an address into a 32-byte topic word for log topic filters. */
+export function addressToTopic(address: string): string {
+  const hex = address.replace(/^0x/, '').toLowerCase();
+  return '0x' + hex.padStart(64, '0');
+}
+
 export function hexToBigInt(hex: string): bigint {
   if (!hex || hex === '0x') return 0n;
   return BigInt(hex.startsWith('0x') ? hex : '0x' + hex);

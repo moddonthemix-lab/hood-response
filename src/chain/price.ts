@@ -25,7 +25,14 @@ export class PriceOracle {
   }
 
   priceOf(tokenAddress: string): number {
-    return this.prices.get(tokenAddress.toLowerCase()) ?? 0.0001;
+    const key = tokenAddress.toLowerCase();
+    let price = this.prices.get(key);
+    if (price === undefined) {
+      // Discovered tokens are priced on demand and cached.
+      price = this.derive(key);
+      this.prices.set(key, price);
+    }
+    return price;
   }
 
   usdValue(tokenAddress: string, humanAmount: number): number {

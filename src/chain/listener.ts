@@ -6,11 +6,13 @@ import type { SwapEvent, TrackedWallet } from '../types.js';
 import { PriceOracle } from './price.js';
 import {
   TRANSFER_TOPIC,
+  addressToTopic,
   decodeTransfer,
   directionFor,
   toHuman,
   type EthLog,
 } from './decoder.js';
+import { fetchTokenMetadata } from './metadata.js';
 
 export type SwapHandler = (e: SwapEvent) => void;
 
@@ -33,6 +35,7 @@ export class LiveChainListener implements ChainListener {
   private latencyTimer: NodeJS.Timeout | null = null;
   private nextId = 1;
   private readonly pendingLatency = new Map<number, number>();
+  private readonly enriching = new Set<string>();
 
   constructor(
     private readonly store: MemoryStore,
@@ -64,12 +67,26 @@ export class LiveChainListener implements ChainListener {
       this.backoffMs = 1000;
       this.store.updateMetrics({ wsConnected: true });
       logger.info('chain websocket connected');
-      // Subscribe to Transfer logs for tracked tokens.
-      const addresses = [...this.store.tokensByAddress.keys()];
-      this.send('eth_subscribe', [
-        'logs',
-        { address: addresses, topics: [TRANSFER_TOPIC] },
-      ]);
+      if (config.DISCOVERY_MODE) {
+        // Discovery: watch Transfer logs by tracked WALLET (any token), so
+        // brand-new coins the wallets buy are captured. `to`=wallet ⇒ BUY,
+        // `from`=wallet ⇒ SELL. Wallet addresses are indexed topics, so the
+        // node does the filtering.
+        const walletTopics = [...this.store.wallets.keys()].map(addressToTopic);
+        this.send('eth_subscribe', [
+          'logs',
+          { topics: [TRANSFER_TOPIC, null, walletTopics] }, // buys
+        ]);
+        this.send('eth_subscribe', [
+          'logs',
+          { topics: [TRANSFER_TOPIC, walletTopics, null] }, // sells
+        ]);
+        logger.info({ wallets: walletTopics.length }, 'discovery mode: subscribed by wallet');
+      } else {
+        // Legacy: only the seeded/tracked tokens.
+        const addresses = [...this.store.tokensByAddress.keys()];
+        this.send('eth_subscribe', ['logs', { address: addresses, topics: [TRANSFER_TOPIC] }]);
+      }
       this.send('eth_subscribe', ['newHeads']);
       this.startLatencyProbe();
     });
@@ -141,10 +158,17 @@ export class LiveChainListener implements ChainListener {
   private handleLog(log: EthLog): void {
     const transfer = decodeTransfer(log);
     if (!transfer) return;
-    const token = this.store.tokensByAddress.get(transfer.token);
-    if (!token) return;
     const match = directionFor(transfer, (a) => this.store.isTracked(a));
     if (!match) return;
+
+    // In discovery mode the token may be brand-new — register it and enrich its
+    // metadata from chain in the background. In legacy mode, skip unknowns.
+    let token = this.store.tokensByAddress.get(transfer.token);
+    if (!token) {
+      if (!config.DISCOVERY_MODE) return;
+      token = this.store.ensureToken(transfer.token);
+      this.enrich(transfer.token);
+    }
 
     const amount = toHuman(transfer.rawValue, 18);
     const swap: SwapEvent = {
@@ -159,6 +183,17 @@ export class LiveChainListener implements ChainListener {
       timestamp: Date.now(),
     };
     this.onSwap(swap);
+  }
+
+  /** Best-effort, one-time metadata enrichment for a discovered token. */
+  private enrich(tokenAddr: string): void {
+    if (!config.CHAIN_HTTP_URL || this.enriching.has(tokenAddr)) return;
+    this.enriching.add(tokenAddr);
+    void fetchTokenMetadata(config.CHAIN_HTTP_URL, tokenAddr)
+      .then((meta) => {
+        if (meta) this.store.updateTokenMeta(tokenAddr, meta);
+      })
+      .catch(() => undefined);
   }
 }
 
@@ -197,16 +232,27 @@ export class SimulatorChainListener implements ChainListener {
     return arr[Math.floor(Math.random() * arr.length)]!;
   }
 
-  private emitSwap(wallet: TrackedWallet, tokenSymbol: string, direction: 'BUY' | 'SELL'): void {
-    const token = this.store.tokensBySymbol.get(tokenSymbol);
-    if (!token) return;
+  /** Mint a plausible brand-new token (not in the seed set) for discovery demos. */
+  private newToken(): { address: string; symbol: string } {
+    const names = ['MOONPIG', 'GIGACHAD', 'FLYCOIN', 'RUGME', 'BONKJR', 'HOODRAT', 'PEPE2', 'WAGMI', 'DEGEN', 'SNIPER'];
+    const symbol = `${this.pick(names)}${Math.floor(Math.random() * 900 + 100)}`;
+    let addr = '0x';
+    for (let i = 0; i < 40; i++) addr += Math.floor(Math.random() * 16).toString(16);
+    return { address: addr.toLowerCase(), symbol };
+  }
+
+  private emitSwap(
+    wallet: TrackedWallet,
+    token: { address: string; symbol: string },
+    direction: 'BUY' | 'SELL',
+  ): void {
     const amount = Math.floor(50_000 + Math.random() * 4_000_000);
     this.block += Math.random() < 0.3 ? 1 : 0;
     const swap: SwapEvent = {
       txHash: '0x' + Math.random().toString(16).slice(2).padEnd(64, '0').slice(0, 64),
       wallet: wallet.address,
       token: token.address,
-      tokenSymbol,
+      tokenSymbol: token.symbol,
       direction,
       amount,
       usdValue: this.price.usdValue(token.address, amount),
@@ -220,13 +266,32 @@ export class SimulatorChainListener implements ChainListener {
     this.onSwap(swap);
   }
 
+  private tokenBySymbol(symbol: string): { address: string; symbol: string } {
+    const t = this.store.tokensBySymbol.get(symbol)!;
+    return { address: t.address, symbol: t.symbol };
+  }
+
   private tick(): void {
     if (Math.random() < config.SIM_SWARM_CHANCE) {
-      // Coordinated swarm: prefer wallets that actually hold the token.
-      const token = this.pick([...this.store.tokensBySymbol.keys()]);
-      const direction: 'BUY' | 'SELL' = Math.random() < 0.65 ? 'BUY' : 'SELL';
-      const holders = this.walletList.filter((w) => w.holdsTokens.includes(token));
-      const pool = holders.length >= 3 ? holders : this.walletList;
+      const discovery = config.DISCOVERY_MODE && Math.random() < config.SIM_DISCOVERY_CHANCE;
+
+      let token: { address: string; symbol: string };
+      let direction: 'BUY' | 'SELL';
+      let pool: TrackedWallet[];
+
+      if (discovery) {
+        // Tracked wallets coordinate into a brand-new coin — the early signal.
+        token = this.newToken();
+        direction = 'BUY';
+        pool = this.walletList;
+      } else {
+        const symbol = this.pick([...this.store.tokensBySymbol.keys()]);
+        token = this.tokenBySymbol(symbol);
+        direction = Math.random() < 0.65 ? 'BUY' : 'SELL';
+        const holders = this.walletList.filter((w) => w.holdsTokens.includes(symbol));
+        pool = holders.length >= 3 ? holders : this.walletList;
+      }
+
       const count = 3 + Math.floor(Math.random() * 4);
       const chosen = new Set<TrackedWallet>();
       while (chosen.size < Math.min(count, pool.length)) chosen.add(this.pick(pool));
@@ -237,12 +302,12 @@ export class SimulatorChainListener implements ChainListener {
         delay += Math.floor(Math.random() * 800);
       }
     } else {
-      // Background noise: a single random swap.
+      // Background noise: a single random swap on a seeded token.
       const w = this.pick(this.walletList);
-      const token = w.holdsTokens.length
+      const symbol = w.holdsTokens.length
         ? this.pick(w.holdsTokens)
         : this.pick([...this.store.tokensBySymbol.keys()]);
-      this.emitSwap(w, token, Math.random() < 0.5 ? 'BUY' : 'SELL');
+      this.emitSwap(w, this.tokenBySymbol(symbol), Math.random() < 0.5 ? 'BUY' : 'SELL');
     }
   }
 }

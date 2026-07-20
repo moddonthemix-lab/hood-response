@@ -55,6 +55,12 @@ const schema = z.object({
   CHAIN_MODE: z.enum(['live', 'simulator', 'auto']).default('auto'),
   SIM_TICK_MS: num(1500),
   SIM_SWARM_CHANCE: num(0.35),
+  // Discovery mode: detect swarms on ANY token tracked wallets trade (including
+  // brand-new coins), auto-registering unknown tokens. When false, only the
+  // seeded/tracked tokens are watched (legacy behaviour).
+  DISCOVERY_MODE: bool(true),
+  // Fraction of simulated swarms that target a brand-new (unseen) token.
+  SIM_DISCOVERY_CHANCE: num(0.4),
 
   ALERT_MIN_WALLETS: num(3),
   ALERT_WINDOW_SECONDS: num(30),

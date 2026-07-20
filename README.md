@@ -18,6 +18,7 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 
 | Capability | Detail |
 |---|---|
+| **New-coin discovery** | ≥ N tracked wallets buy the **same token that isn't on the list** → 🆕 alert with the contract, and the token auto-registers on the dashboard. This is the early-signal mode: it follows the *wallets*, not a fixed token set. Toggle with `DISCOVERY_MODE` |
 | **Swarm detection** | ≥ N unique tracked wallets BUY the same token within a window → alert |
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
@@ -55,8 +56,16 @@ Robinhood RPC (WebSocket)
    SSE / REST ──► Dashboard
 ```
 
+In **discovery mode** (default), the live listener subscribes to Transfer logs
+by tracked-**wallet** topics rather than by token address, so it catches those
+wallets buying *any* token — including brand-new coins. Unknown tokens are
+auto-registered (and their symbol/supply enriched from chain via `eth_call`
+when `CHAIN_HTTP_URL` is set). Set `DISCOVERY_MODE=false` to watch only the
+seeded tokens.
+
 When `CHAIN_WS_URL` is unset the bot runs in **simulator mode**, replaying
-synthetic coordinated swaps against the seeded wallets so the whole pipeline
+synthetic coordinated swaps against the seeded wallets — including periodic
+brand-new-coin swarms (`SIM_DISCOVERY_CHANCE`) — so the whole pipeline
 (detection → conviction → alerts → dashboard) is exercised with zero external
 dependencies.
 

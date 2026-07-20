@@ -36,6 +36,10 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .tag.BUY { background:#0d2a17; color:var(--green); }
   .tag.SELL { background:#2b1113; color:var(--red); }
   .tag.ROTATION { background:#20132e; color:var(--violet); }
+  .tag.NEW { background:#3a2a05; color:#f0b429; }
+  .addr { color:var(--muted); font-size:11px; }
+  .newcard { border-color:#4a3607; box-shadow:0 0 0 1px #4a360733; }
+  .newcard h2 { color:#f0b429; }
   .mono { color:var(--muted); font-size:12px; }
   .sym { font-weight:700; }
   .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -69,6 +73,11 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
 </header>
 
 <main>
+  <section class="card newcard full">
+    <h2>🆕 New-Coin Swarms <span class="mono">tracked wallets buying coins not on the list</span></h2>
+    <div class="body" id="newcoins"><div class="empty">no new-coin swarms yet</div></div>
+  </section>
+
   <section class="card">
     <h2>Live Feed <span class="mono" id="feed-count"></span></h2>
     <div class="body" id="feed"><div class="empty">waiting for swaps…</div></div>
@@ -116,10 +125,12 @@ function feedRow(s){
     '<span class="mono">'+time(s.timestamp)+'</span>';
   return d;
 }
+const newBadge = (s) => s.newToken ? '<span class="tag NEW">NEW</span>' : '';
+
 function swarmRow(s){
   const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
     '<span class="sym">'+s.tokenSymbol+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
@@ -129,11 +140,21 @@ function swarmRow(s){
 function alertRow(a){
   const s=a.swarm; const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
     '<span class="sym">'+s.tokenSymbol+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
     '<span class="mono">'+time(a.createdAt)+'</span>';
+  return d;
+}
+function newCoinRow(s){
+  const d=document.createElement('div'); d.className='row flash';
+  d.innerHTML='<span class="tag NEW">NEW</span>'+
+    '<span class="sym">'+s.tokenSymbol+'</span>'+
+    '<span class="grow addr" title="'+s.token+'">'+s.token+'</span>'+
+    '<span class="mono">'+s.walletCount+'w · '+mcLabel(s)+'</span>'+
+    '<span class="usd">'+usd(s.totalUsd)+'</span>'+
+    '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
   return d;
 }
 
@@ -171,8 +192,12 @@ async function boot(){
   $('m-alerts').textContent=stats.totals.alerts;
   applyStats(stats.metrics);
 
-  const swarms=await fetch('/api/swarms?limit=30').then(r=>r.json());
-  const se=$('swarms'); if(swarms.length){ clearEmpty(se); swarms.reverse().forEach(s=>se.prepend(swarmRow(s))); }
+  const swarms=await fetch('/api/swarms?limit=50').then(r=>r.json());
+  const se=$('swarms'); const nc=$('newcoins');
+  if(swarms.length){ clearEmpty(se);
+    swarms.slice().reverse().forEach(s=>{ se.prepend(swarmRow(s)); if(s.newToken){ clearEmpty(nc); nc.prepend(newCoinRow(s)); } });
+    cap(se,40); cap(nc,40);
+  }
   const alerts=await fetch('/api/alerts?limit=30').then(r=>r.json());
   const ae=$('alerts'); if(alerts.length){ clearEmpty(ae); alerts.reverse().forEach(a=>ae.prepend(alertRow(a))); }
 
@@ -184,7 +209,8 @@ async function boot(){
   es.addEventListener('swap', e=>{ const s=JSON.parse(e.data); const f=$('feed'); clearEmpty(f);
     f.prepend(feedRow(s)); cap(f,60); $('m-swaps').textContent=++swaps; });
   es.addEventListener('swarm', e=>{ const s=JSON.parse(e.data); clearEmpty(se);
-    $('swarms').prepend(swarmRow(s)); cap($('swarms'),40); $('m-swarms').textContent=++sw; });
+    $('swarms').prepend(swarmRow(s)); cap($('swarms'),40); $('m-swarms').textContent=++sw;
+    if(s.newToken){ const nc=$('newcoins'); clearEmpty(nc); nc.prepend(newCoinRow(s)); cap(nc,40); } });
   es.addEventListener('alert', e=>{ const a=JSON.parse(e.data); clearEmpty(ae);
     $('alerts').prepend(alertRow(a)); cap($('alerts'),40); $('m-alerts').textContent=++al; });
   es.addEventListener('metrics', e=>applyStats(JSON.parse(e.data)));
