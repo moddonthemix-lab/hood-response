@@ -23,6 +23,7 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
 | **Conviction score** | 0–100 from wallet quality, count, capital, velocity, liquidity, market cap, historical accuracy, buy/sell ratio |
+| **Live prices & market cap** | real USD price / market cap / pair link from DexScreener (cached, background-refreshed, chain-filtered) when `DEXSCREENER_CHAIN` is set; deterministic synthetic fallback (marked `est`) otherwise |
 | **Market cap context** | every swarm/alert reports the token market cap it was bought/sold into |
 | **Address privacy** | wallet addresses are never surfaced in alerts, the dashboard, or the API feeds/SSE — only wallet counts and a category makeup (e.g. "3 smart-money · 1 whale") are shown |
 | **DexScreener links** | every alert (Telegram/Discord) and dashboard token links straight to its DexScreener chart; set `DEXSCREENER_CHAIN` for direct token pages, otherwise universal address search |
@@ -93,9 +94,11 @@ classifies each as a BUY (tracked wallet receiving) or SELL (tracked wallet
 sending), auto-reconnects with exponential backoff, and reports block height +
 RPC latency to the dashboard.
 
-> USD notionals use a deterministic placeholder price oracle
-> (`src/chain/price.ts`) since this build has no public price feed — swap in a
-> real DexScreener / on-chain TWAP source there without touching any callers.
+> **Prices:** set `DEXSCREENER_CHAIN` to Robinhood Chain's DexScreener slug to
+> pull real USD price, market cap, and pair links from DexScreener (the slug is
+> required so we select the pair on the right chain, not a same-address token
+> elsewhere). Without it, prices are a deterministic synthetic placeholder and
+> alerts/dashboard mark the market cap as `est`. See `src/chain/price.ts`.
 
 ## Configuration
 

@@ -21,7 +21,8 @@ async function main(): Promise<void> {
   );
 
   const store = new MemoryStore();
-  const price = new PriceOracle([...store.tokensByAddress.values()]);
+  const price = new PriceOracle([...store.tokensByAddress.values()], store);
+  price.start();
   const aggregator = new Aggregator(store, price);
   const engine = new AlertEngine(store, aggregator);
 
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info({ signal }, 'shutting down gracefully');
     listener.stop();
+    price.stop();
     await app.close().catch(() => undefined);
     await detachPersistence();
     process.exit(0);

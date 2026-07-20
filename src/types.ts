@@ -89,6 +89,10 @@ export interface Swarm {
   /** True when this swarm is on a token discovered by tracked wallets rather
    *  than one from the original seed set — the early-discovery signal. */
   newToken: boolean;
+  /** DexScreener link for the token (precise pair page when known). */
+  dexUrl: string;
+  /** True when price/market cap came from a live DexScreener pair (vs synthetic). */
+  priceLive: boolean;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;
