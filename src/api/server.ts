@@ -7,10 +7,25 @@ import type { MemoryStore } from '../store/memory.js';
 import type { AlertEngine } from '../engine/alertEngine.js';
 import type { Aggregator } from '../engine/aggregator.js';
 import { configuredChannels } from '../notify/index.js';
-import type { AlertRule, WalletCategory } from '../types.js';
+import type { Alert, AlertRule, Swarm, SwapEvent, WalletCategory } from '../types.js';
 import { DASHBOARD_HTML } from './dashboard.js';
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
+
+// ── Address redaction ─────────────────────────────────────────────────────────
+// Wallet addresses are never exposed on activity feeds, alerts, or the SSE
+// stream. Only counts and the category makeup (walletSummary) are surfaced.
+function redactSwap(s: SwapEvent): Omit<SwapEvent, 'wallet'> {
+  const { wallet: _wallet, ...rest } = s;
+  return rest;
+}
+function redactSwarm(s: Swarm): Omit<Swarm, 'wallets'> {
+  const { wallets: _wallets, ...rest } = s;
+  return rest;
+}
+function redactAlert(a: Alert): Omit<Alert, 'swarm'> & { swarm: Omit<Swarm, 'wallets'> } {
+  return { ...a, swarm: redactSwarm(a.swarm) };
+}
 
 const CATEGORIES: WalletCategory[] = [
   'developer',
@@ -99,7 +114,11 @@ export async function buildServer(
     const q = (req.query as { category?: string }).category;
     let wallets = [...store.wallets.values()];
     if (q) wallets = wallets.filter((w) => w.category === q);
-    return wallets.map((w) => ({ ...w, stats: store.walletStats.get(w.address) ?? null }));
+    // Omit the raw address from the public list; keep label/category/stats.
+    return wallets.map(({ address, ...w }) => ({
+      ...w,
+      stats: store.walletStats.get(address) ?? null,
+    }));
   });
 
   app.get('/api/wallets/:address', async (req, reply) => {
@@ -109,7 +128,11 @@ export async function buildServer(
     return {
       ...wallet,
       stats: store.walletStats.get(address) ?? null,
-      recentSwaps: store.recentSwaps(500).filter((s) => s.wallet === address).slice(0, 50),
+      recentSwaps: store
+        .recentSwaps(500)
+        .filter((s) => s.wallet === address)
+        .slice(0, 50)
+        .map(redactSwap),
     };
   });
 
@@ -131,27 +154,30 @@ export async function buildServer(
   // ── Feeds ────────────────────────────────────────────────────────────────────
   app.get('/api/swaps', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
-    return store.recentSwaps(limit);
+    return store.recentSwaps(limit).map(redactSwap);
   });
   app.get('/api/swarms', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
-    return store.recentSwarms(limit);
+    return store.recentSwarms(limit).map(redactSwarm);
   });
   app.get('/api/alerts', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
-    return store.recentAlerts(limit);
+    return store.recentAlerts(limit).map(redactAlert);
   });
 
   // ── Leaderboards ──────────────────────────────────────────────────────────────
   app.get('/api/leaderboard/wallets', async () => {
     return [...store.walletStats.entries()]
-      .map(([address, s]) => ({
-        address,
-        label: store.wallets.get(address)?.label ?? null,
-        ...s,
-        netUsd: s.usdIn - s.usdOut,
-        activity: s.buys + s.sells,
-      }))
+      .map(([address, s]) => {
+        const w = store.wallets.get(address);
+        return {
+          label: w?.label ?? 'tracked wallet',
+          category: w?.category ?? 'unknown',
+          ...s,
+          netUsd: s.usdIn - s.usdOut,
+          activity: s.buys + s.sells,
+        };
+      })
       .sort((a, b) => b.activity - a.activity)
       .slice(0, 25);
   });
@@ -205,9 +231,10 @@ export async function buildServer(
     const send = (event: string) => (payload: unknown) => {
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
     };
-    const onSwap = send('swap');
-    const onSwarm = send('swarm');
-    const onAlert = send('alert');
+    // Redact wallet addresses before they leave the server over SSE.
+    const onSwap = (e: SwapEvent) => send('swap')(redactSwap(e));
+    const onSwarm = (s: Swarm) => send('swarm')(redactSwarm(s));
+    const onAlert = (a: Alert) => send('alert')(redactAlert(a));
     const onMetrics = send('metrics');
     store.on('swap', onSwap);
     store.on('swarm', onSwarm);
