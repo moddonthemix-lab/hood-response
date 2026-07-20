@@ -22,6 +22,54 @@ export interface ChainListener {
 }
 
 /**
+ * Decode a Transfer log into a swap for a tracked wallet, shared by the WS and
+ * HTTP listeners. Registers brand-new tokens in discovery mode (invoking
+ * `onNewToken`); returns null for anything not involving a tracked wallet.
+ */
+function buildSwapFromLog(
+  store: MemoryStore,
+  price: PriceOracle,
+  log: EthLog,
+  onNewToken?: (addr: string) => void,
+): SwapEvent | null {
+  const transfer = decodeTransfer(log);
+  if (!transfer) return null;
+  const match = directionFor(transfer, (a) => store.isTracked(a));
+  if (!match) return null;
+
+  let token = store.tokensByAddress.get(transfer.token);
+  if (!token) {
+    if (!config.DISCOVERY_MODE) return null;
+    token = store.ensureToken(transfer.token);
+    onNewToken?.(transfer.token);
+  }
+
+  const amount = toHuman(transfer.rawValue, 18);
+  return {
+    txHash: transfer.txHash,
+    wallet: match.wallet,
+    token: transfer.token,
+    tokenSymbol: token.symbol,
+    direction: match.direction,
+    amount,
+    usdValue: price.usdValue(transfer.token, amount),
+    blockNumber: transfer.blockNumber || store.metrics.lastBlock,
+    timestamp: Date.now(),
+  };
+}
+
+/** Best-effort, one-time on-chain metadata enrichment for a discovered token. */
+function enrichToken(store: MemoryStore, tokenAddr: string, inflight: Set<string>): void {
+  if (!config.CHAIN_HTTP_URL || inflight.has(tokenAddr)) return;
+  inflight.add(tokenAddr);
+  void fetchTokenMetadata(config.CHAIN_HTTP_URL, tokenAddr)
+    .then((meta) => {
+      if (meta) store.updateTokenMeta(tokenAddr, meta);
+    })
+    .catch(() => undefined);
+}
+
+/**
  * Live listener: subscribes to ERC-20 Transfer logs for the tracked tokens over
  * a JSON-RPC WebSocket, decodes them into BUY/SELL swaps for tracked wallets,
  * and auto-reconnects with exponential backoff. New heads drive block/latency
@@ -156,44 +204,10 @@ export class LiveChainListener implements ChainListener {
   }
 
   private handleLog(log: EthLog): void {
-    const transfer = decodeTransfer(log);
-    if (!transfer) return;
-    const match = directionFor(transfer, (a) => this.store.isTracked(a));
-    if (!match) return;
-
-    // In discovery mode the token may be brand-new — register it and enrich its
-    // metadata from chain in the background. In legacy mode, skip unknowns.
-    let token = this.store.tokensByAddress.get(transfer.token);
-    if (!token) {
-      if (!config.DISCOVERY_MODE) return;
-      token = this.store.ensureToken(transfer.token);
-      this.enrich(transfer.token);
-    }
-
-    const amount = toHuman(transfer.rawValue, 18);
-    const swap: SwapEvent = {
-      txHash: transfer.txHash,
-      wallet: match.wallet,
-      token: transfer.token,
-      tokenSymbol: token.symbol,
-      direction: match.direction,
-      amount,
-      usdValue: this.price.usdValue(transfer.token, amount),
-      blockNumber: transfer.blockNumber || this.store.metrics.lastBlock,
-      timestamp: Date.now(),
-    };
-    this.onSwap(swap);
-  }
-
-  /** Best-effort, one-time metadata enrichment for a discovered token. */
-  private enrich(tokenAddr: string): void {
-    if (!config.CHAIN_HTTP_URL || this.enriching.has(tokenAddr)) return;
-    this.enriching.add(tokenAddr);
-    void fetchTokenMetadata(config.CHAIN_HTTP_URL, tokenAddr)
-      .then((meta) => {
-        if (meta) this.store.updateTokenMeta(tokenAddr, meta);
-      })
-      .catch(() => undefined);
+    const swap = buildSwapFromLog(this.store, this.price, log, (a) =>
+      enrichToken(this.store, a, this.enriching),
+    );
+    if (swap) this.onSwap(swap);
   }
 }
 
@@ -312,12 +326,137 @@ export class SimulatorChainListener implements ChainListener {
   }
 }
 
+/**
+ * HTTP polling listener: works against a plain JSON-RPC HTTP endpoint (no
+ * WebSocket needed), such as Robinhood Chain's public RPC. Each tick it reads
+ * the chain head and pulls Transfer logs for tracked wallets over the new block
+ * range via `eth_getLogs`, decoding them into swaps. This is what makes the bot
+ * genuinely live without a paid streaming provider.
+ */
+export class HttpPollingChainListener implements ChainListener {
+  private timer: NodeJS.Timeout | null = null;
+  private stopped = false;
+  private lastBlock = 0;
+  private polling = false;
+  private walletTopics: string[] = [];
+  private readonly enriching = new Set<string>();
+  private static readonly MAX_RANGE = 5000;
+
+  constructor(
+    private readonly store: MemoryStore,
+    private readonly price: PriceOracle,
+    private readonly onSwap: SwapHandler,
+  ) {}
+
+  start(): void {
+    this.stopped = false;
+    this.walletTopics = [...this.store.wallets.keys()].map(addressToTopic);
+    this.store.updateMetrics({ mode: 'live' });
+    logger.info({ rpc: config.CHAIN_HTTP_URL }, 'HTTP polling listener started');
+    void this.init();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.store.updateMetrics({ wsConnected: false });
+  }
+
+  private async init(): Promise<void> {
+    const head = await this.blockNumber();
+    this.lastBlock = head ?? 0;
+    this.store.updateMetrics({ wsConnected: head != null, lastBlock: this.lastBlock });
+    this.timer = setInterval(() => void this.poll(), config.POLL_INTERVAL_MS);
+  }
+
+  private async rpc(method: string, params: unknown[]): Promise<any> {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(config.CHAIN_HTTP_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as { result?: unknown; error?: unknown };
+      if (json.error) {
+        logger.warn({ method, error: json.error }, 'rpc error');
+        return null;
+      }
+      return json.result ?? null;
+    } catch (err) {
+      logger.warn({ method, err: String(err) }, 'rpc call failed');
+      return null;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  private async blockNumber(): Promise<number | null> {
+    const start = Date.now();
+    const r = (await this.rpc('eth_blockNumber', [])) as string | null;
+    if (r == null) return null;
+    this.store.updateMetrics({ rpcLatencyMs: Date.now() - start });
+    return Number(BigInt(r));
+  }
+
+  private async poll(): Promise<void> {
+    if (this.stopped || this.polling) return;
+    this.polling = true;
+    try {
+      const head = await this.blockNumber();
+      if (head == null) {
+        this.store.updateMetrics({ wsConnected: false });
+        return;
+      }
+      this.store.updateMetrics({ wsConnected: true, lastBlock: head });
+      if (head <= this.lastBlock) return;
+
+      const from = this.lastBlock + 1;
+      const to = Math.min(head, from + HttpPollingChainListener.MAX_RANGE - 1);
+      const fromHex = '0x' + from.toString(16);
+      const toHex = '0x' + to.toString(16);
+      const base: Record<string, unknown> = config.DISCOVERY_MODE
+        ? {} // any token
+        : { address: [...this.store.tokensByAddress.keys()] };
+
+      const [buys, sells] = await Promise.all([
+        this.rpc('eth_getLogs', [
+          { ...base, fromBlock: fromHex, toBlock: toHex, topics: [TRANSFER_TOPIC, null, this.walletTopics] },
+        ]) as Promise<EthLog[] | null>,
+        this.rpc('eth_getLogs', [
+          { ...base, fromBlock: fromHex, toBlock: toHex, topics: [TRANSFER_TOPIC, this.walletTopics, null] },
+        ]) as Promise<EthLog[] | null>,
+      ]);
+
+      const seen = new Set<string>();
+      for (const log of [...(buys ?? []), ...(sells ?? [])]) {
+        const key = `${log.transactionHash}:${(log as { logIndex?: string }).logIndex}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const swap = buildSwapFromLog(this.store, this.price, log, (a) =>
+          enrichToken(this.store, a, this.enriching),
+        );
+        if (swap) this.onSwap(swap);
+      }
+      this.lastBlock = to;
+    } finally {
+      this.polling = false;
+    }
+  }
+}
+
 export function createListener(
   store: MemoryStore,
   price: PriceOracle,
   onSwap: SwapHandler,
 ): ChainListener {
-  return config.chainMode === 'live'
+  if (config.chainMode !== 'live') return new SimulatorChainListener(store, price, onSwap);
+  // Prefer a streaming WS endpoint; otherwise poll the HTTP RPC.
+  return config.CHAIN_WS_URL
     ? new LiveChainListener(store, price, onSwap)
-    : new SimulatorChainListener(store, price, onSwap);
+    : new HttpPollingChainListener(store, price, onSwap);
 }

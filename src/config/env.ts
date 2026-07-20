@@ -50,9 +50,14 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 
   CHAIN_WS_URL: z.string().default(''),
-  CHAIN_HTTP_URL: z.string().default(''),
-  CHAIN_ID: z.string().default(''),
+  // Public Robinhood Chain RPC (chain id 4663). Used by the HTTP polling
+  // listener and for token metadata. Override with a dedicated provider
+  // (Alchemy/QuickNode) for production throughput.
+  CHAIN_HTTP_URL: z.string().default('https://rpc.mainnet.chain.robinhood.com'),
+  CHAIN_ID: z.string().default('4663'),
   CHAIN_MODE: z.enum(['live', 'simulator', 'auto']).default('auto'),
+  // HTTP polling cadence (ms) when using the HTTP listener.
+  POLL_INTERVAL_MS: num(4000),
   SIM_TICK_MS: num(1500),
   SIM_SWARM_CHANCE: num(0.35),
   // Discovery mode: detect swarms on ANY token tracked wallets trade (including
@@ -83,7 +88,7 @@ const schema = z.object({
   // real price / market-cap from DexScreener (the slug is needed to pick the
   // right pair). Left empty, links fall back to universal search and prices
   // stay synthetic.
-  DEXSCREENER_CHAIN: z.string().default(''),
+  DEXSCREENER_CHAIN: z.string().default('robinhood'),
   // How often (ms) to refresh live prices from DexScreener.
   PRICE_REFRESH_MS: num(15000),
 });
@@ -104,12 +109,9 @@ if (!parsed.success) {
 const env = parsed.data;
 
 /** Resolve the effective data source once, so the rest of the app is simple. */
+const hasLiveSource = env.CHAIN_WS_URL.length > 0 || env.CHAIN_HTTP_URL.length > 0;
 const chainMode: 'live' | 'simulator' =
-  env.CHAIN_MODE === 'auto'
-    ? env.CHAIN_WS_URL
-      ? 'live'
-      : 'simulator'
-    : env.CHAIN_MODE;
+  env.CHAIN_MODE === 'auto' ? (hasLiveSource ? 'live' : 'simulator') : env.CHAIN_MODE;
 
 export const config = {
   ...env,

@@ -58,16 +58,20 @@ Robinhood RPC (WebSocket)
    SSE / REST ──► Dashboard
 ```
 
-In **discovery mode** (default), the live listener subscribes to Transfer logs
-by tracked-**wallet** topics rather than by token address, so it catches those
-wallets buying *any* token — including brand-new coins. Unknown tokens are
-auto-registered (and their symbol/supply enriched from chain via `eth_call`
-when `CHAIN_HTTP_URL` is set). Set `DISCOVERY_MODE=false` to watch only the
-seeded tokens.
+**The bot ships live by default.** It polls Robinhood Chain's public HTTP RPC
+(`https://rpc.mainnet.chain.robinhood.com`, chain id 4663) every few seconds
+via `eth_getLogs`, pulling Transfer logs for the tracked wallets and decoding
+them into swaps — no paid provider or WebSocket required. Point `CHAIN_WS_URL`
+at a streaming provider (Alchemy/QuickNode) to use lower-latency websocket
+subscriptions instead.
 
-When `CHAIN_WS_URL` is unset the bot runs in **simulator mode**, replaying
-synthetic coordinated swaps against the seeded wallets — including periodic
-brand-new-coin swarms (`SIM_DISCOVERY_CHANCE`) — so the whole pipeline
+In **discovery mode** (default), it filters logs by tracked-**wallet** topics
+rather than by token, so it catches those wallets buying *any* token —
+including brand-new coins, which are auto-registered and priced. Set
+`DISCOVERY_MODE=false` to watch only the seeded tokens.
+
+Set `CHAIN_MODE=simulator` to run without the chain — it replays synthetic
+coordinated swaps (including periodic new-coin swarms) so the whole pipeline
 (detection → conviction → alerts → dashboard) is exercised with zero external
 dependencies.
 
@@ -94,11 +98,11 @@ classifies each as a BUY (tracked wallet receiving) or SELL (tracked wallet
 sending), auto-reconnects with exponential backoff, and reports block height +
 RPC latency to the dashboard.
 
-> **Prices:** set `DEXSCREENER_CHAIN` to Robinhood Chain's DexScreener slug to
-> pull real USD price, market cap, and pair links from DexScreener (the slug is
-> required so we select the pair on the right chain, not a same-address token
-> elsewhere). Without it, prices are a deterministic synthetic placeholder and
-> alerts/dashboard mark the market cap as `est`. See `src/chain/price.ts`.
+> **Prices:** `DEXSCREENER_CHAIN` (default `robinhood`) pulls real USD price,
+> market cap, and pair links from DexScreener. The slug selects the pair on the
+> right chain rather than a same-address token elsewhere. Clear it to fall back
+> to a deterministic synthetic placeholder (market cap shown as `est`). See
+> `src/chain/price.ts`.
 
 ## Configuration
 
