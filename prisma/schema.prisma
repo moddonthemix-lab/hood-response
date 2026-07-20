@@ -1,0 +1,46 @@
+// Optional persistence layer for Swarm the Fly. The bot runs fully in-memory;
+// when DATABASE_URL is set these tables archive detected swarms and fired
+// alerts for historical analysis. Apply with `prisma migrate deploy`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Swarm {
+  id            String   @id
+  kind          String
+  token         String
+  tokenSymbol   String
+  walletCount   Int
+  wallets       String[]
+  totalUsd      Float
+  conviction    Int
+  windowSeconds Float
+  firstSeen     DateTime
+  lastSeen      DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([tokenSymbol])
+  @@index([kind])
+  @@index([createdAt])
+}
+
+model Alert {
+  id          String   @id
+  ruleId      String
+  ruleName    String
+  swarmId     String
+  kind        String
+  tokenSymbol String
+  conviction  Int
+  totalUsd    Float
+  createdAt   DateTime @default(now())
+
+  @@index([tokenSymbol])
+  @@index([createdAt])
+}
