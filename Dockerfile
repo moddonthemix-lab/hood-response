@@ -4,7 +4,7 @@ ENV NODE_ENV=production
 
 # Install all deps (dev deps needed for the TypeScript build + prisma generate).
 COPY package.json ./
-RUN npm install --no-audit --no-fund
+RUN npm install --include=dev --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY prisma ./prisma

@@ -339,8 +339,11 @@ export class HttpPollingChainListener implements ChainListener {
   private lastBlock = 0;
   private polling = false;
   private walletTopics: string[] = [];
+  private pollCount = 0;
   private readonly enriching = new Set<string>();
   private static readonly MAX_RANGE = 5000;
+  /** Heartbeat log cadence in polls (~every 60s at the default interval). */
+  private readonly heartbeatEvery = Math.max(1, Math.round(60_000 / config.POLL_INTERVAL_MS));
 
   constructor(
     private readonly store: MemoryStore,
@@ -433,6 +436,7 @@ export class HttpPollingChainListener implements ChainListener {
       ]);
 
       const seen = new Set<string>();
+      let hits = 0;
       for (const log of [...(buys ?? []), ...(sells ?? [])]) {
         const key = `${log.transactionHash}:${(log as { logIndex?: string }).logIndex}`;
         if (seen.has(key)) continue;
@@ -440,9 +444,24 @@ export class HttpPollingChainListener implements ChainListener {
         const swap = buildSwapFromLog(this.store, this.price, log, (a) =>
           enrichToken(this.store, a, this.enriching),
         );
-        if (swap) this.onSwap(swap);
+        if (swap) {
+          hits += 1;
+          this.onSwap(swap);
+        }
       }
       this.lastBlock = to;
+
+      // Visible proof of life: log when a scan finds tracked-wallet activity,
+      // and a periodic heartbeat so the logs show it is actively watching.
+      this.pollCount += 1;
+      if (hits > 0) {
+        logger.info({ blocks: `${from}-${to}`, trackedWalletTxs: hits }, 'scan: tracked-wallet activity');
+      } else if (this.pollCount % this.heartbeatEvery === 0) {
+        logger.info(
+          { watchingWallets: this.walletTopics.length, block: to, totalSwaps: this.store.totals.swaps },
+          'heartbeat: watching wallets, no new tracked-wallet buys/sells this window',
+        );
+      }
     } finally {
       this.polling = false;
     }

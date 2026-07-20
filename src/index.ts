@@ -32,6 +32,14 @@ async function main(): Promise<void> {
   const listener = createListener(store, price, (swap) => {
     // Auto-register unknown tokens so brand-new coins flow through the pipeline.
     store.ensureToken(swap.token, swap.tokenSymbol);
+    // Log only meaningful (non-dust) live buys/sells — these wallets can be very
+    // active in low-value tokenised assets, which would otherwise flood the log.
+    if (config.chainMode === 'live' && swap.usdValue >= config.IGNORE_DUST_USD) {
+      logger.info(
+        { dir: swap.direction, token: swap.tokenSymbol, usd: Math.round(swap.usdValue) },
+        'tracked-wallet swap',
+      );
+    }
     store.recordSwap(swap);
     for (const swarm of aggregator.ingest(swap)) {
       store.recordSwarm(swarm);
