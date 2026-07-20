@@ -91,6 +91,44 @@ export class MemoryStore extends EventEmitter {
     return this.wallets.has(wallet.toLowerCase());
   }
 
+  /**
+   * Return the token for `address`, auto-registering a *discovered* token if we
+   * have never seen it before. This is what lets the bot surface brand-new
+   * coins that tracked wallets buy without them being pre-listed. Symbol/supply
+   * are best-effort placeholders that chain metadata can later enrich.
+   */
+  ensureToken(address: string, symbol?: string): TrackedToken {
+    const key = address.toLowerCase();
+    const existing = this.tokensByAddress.get(key);
+    if (existing) return existing;
+    const token: TrackedToken = {
+      address: key,
+      symbol: symbol || `TKN-${key.slice(2, 6).toUpperCase()}`,
+      name: symbol || `Discovered ${key.slice(0, 10)}`,
+      totalSupply: 1_000_000_000, // estimated until enriched from chain
+      stable: false,
+      discovered: true,
+      firstSeen: Date.now(),
+    };
+    this.tokensByAddress.set(key, token);
+    this.tokensBySymbol.set(token.symbol, token);
+    this.emit('token', token);
+    return token;
+  }
+
+  /** Patch a discovered token's metadata once real values are known. */
+  updateTokenMeta(address: string, meta: Partial<TrackedToken>): void {
+    const key = address.toLowerCase();
+    const token = this.tokensByAddress.get(key);
+    if (!token) return;
+    const oldSymbol = token.symbol;
+    Object.assign(token, meta);
+    if (meta.symbol && meta.symbol !== oldSymbol) {
+      this.tokensBySymbol.delete(oldSymbol);
+      this.tokensBySymbol.set(token.symbol, token);
+    }
+  }
+
   recordSwap(e: SwapEvent): void {
     this.swaps.push(e);
     this.totals.swaps += 1;

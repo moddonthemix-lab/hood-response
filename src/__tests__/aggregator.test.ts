@@ -82,6 +82,25 @@ describe('Aggregator', () => {
     expect(detected).toHaveLength(0);
   });
 
+  it('discovers a brand-new token when tracked wallets swarm into it', () => {
+    const { store, agg, wallets } = ctx;
+    const unknown = '0xnew0000000000000000000000000000000000cafe';
+    expect(store.tokensByAddress.has(unknown)).toBe(false);
+    const buy = (w: string): SwapEvent => ({
+      ...swap(w, unknown, 'BUY', Date.now()),
+      tokenSymbol: 'MOONPIG777',
+    });
+    agg.ingest(buy(wallets[0]!));
+    agg.ingest(buy(wallets[1]!));
+    const detected = agg.ingest(buy(wallets[2]!));
+    expect(detected).toHaveLength(1);
+    expect(detected[0]!.newToken).toBe(true);
+    expect(detected[0]!.tokenSymbol).toBe('MOONPIG777');
+    // The token is now auto-registered as discovered.
+    const token = store.tokensByAddress.get(unknown);
+    expect(token?.discovered).toBe(true);
+  });
+
   it('detects rotation when sellers of one token buy another', () => {
     const { store, agg, wallets } = ctx;
     const tokenA = store.tokensBySymbol.get('CASHCAT')!.address;

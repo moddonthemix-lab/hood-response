@@ -118,7 +118,8 @@ export class Aggregator {
   }
 
   private buildSwarm(kind: Swarm['kind'], tokenAddr: string, events: SwapEvent[]): Swarm {
-    const token = this.store.tokensByAddress.get(tokenAddr)!;
+    // ensureToken guarantees a registry entry even for freshly discovered tokens.
+    const token = this.store.ensureToken(tokenAddr, events[0]?.tokenSymbol);
     const wallets = events.map((e) => e.wallet);
     const walletObjs = wallets
       .map((a) => this.store.wallets.get(a))
@@ -149,6 +150,7 @@ export class Aggregator {
       walletSummary: summarizeWallets(walletObjs, wallets.length),
       totalUsd,
       marketCap,
+      newToken: token.discovered === true,
       conviction: score,
       convictionBreakdown: breakdown,
       windowSeconds: Number(windowSeconds.toFixed(2)),
