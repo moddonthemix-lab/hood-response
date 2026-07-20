@@ -99,6 +99,7 @@ export async function buildServer(
     ignoreStablecoins: config.IGNORE_STABLECOINS,
     channels: configuredChannels(),
     persistence: { database: config.hasDatabase, redis: config.hasRedis },
+    dexscreenerChain: config.DEXSCREENER_CHAIN || null,
   }));
 
   // ── Tokens ──────────────────────────────────────────────────────────────────
