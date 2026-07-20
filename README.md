@@ -114,8 +114,8 @@ alert rules are additionally editable at runtime through the API. Key vars:
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP bind |
 | `CHAIN_WS_URL` | — | Robinhood Chain WS RPC; empty ⇒ simulator |
 | `CHAIN_MODE` | `auto` | `live`, `simulator`, or `auto` |
-| `ALERT_MIN_WALLETS` | `3` | default swarm threshold |
-| `ALERT_WINDOW_SECONDS` | `30` | default detection window |
+| `ALERT_MIN_WALLETS` | `2` | default swarm threshold |
+| `ALERT_WINDOW_SECONDS` | `300` | default detection window (5 min) |
 | `ALERT_MIN_USD` / `ALERT_MIN_CONVICTION` | `0` / `0` | default gates |
 | `ALERT_COOLDOWN_SECONDS` | `120` | per rule/token/kind cooldown |
 | `IGNORE_DUST_USD` | `25` | drop swaps below this notional |
