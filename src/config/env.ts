@@ -67,8 +67,8 @@ const schema = z.object({
   // Fraction of simulated swarms that target a brand-new (unseen) token.
   SIM_DISCOVERY_CHANCE: num(0.4),
 
-  ALERT_MIN_WALLETS: num(3),
-  ALERT_WINDOW_SECONDS: num(30),
+  ALERT_MIN_WALLETS: num(2),
+  ALERT_WINDOW_SECONDS: num(300),
   ALERT_MIN_USD: num(0),
   ALERT_MIN_CONVICTION: num(0),
   ALERT_COOLDOWN_SECONDS: num(120),
