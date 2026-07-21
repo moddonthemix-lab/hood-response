@@ -1,13 +1,14 @@
 import type { TrackedToken, TrackedWallet, WalletCategory, WalletTier } from '../types.js';
+import { EXPANSION_TOKENS, EXPANSION_HOLDERS } from './expansion.js';
 
 /**
- * Source of truth: "Robinhood Smart-Money Conviction List" (generated
- * 2026-07-20). Top holders of 8 tracked tokens, LP pools / Permit2 / burn
- * addresses excluded. Tokens and the 72 unique wallets below are derived
- * deterministically from this table, so there is a single place to update.
+ * Source of truth: the curated "Robinhood Smart-Money Conviction List" (8 core
+ * tokens) plus an auto-fetched expansion of more top Robinhood Chain tokens
+ * (see scripts/fetch-holders.mjs). Top holders per token, LP pools / contracts /
+ * burn addresses excluded. Wallets are derived + tiered deterministically.
  */
 
-interface RawToken {
+export interface RawTokenSeed {
   symbol: string;
   name: string;
   address: string;
@@ -15,12 +16,12 @@ interface RawToken {
   stable?: boolean;
 }
 
-interface RawHolder {
+export interface RawHolderSeed {
   address: string;
   pct: number;
 }
 
-const RAW_TOKENS: RawToken[] = [
+const RAW_TOKENS: RawTokenSeed[] = [
   { symbol: 'CASHCAT', name: 'CASH CAT', address: '0x020bfC650A365f8BB26819deAAbF3E21291018b4', totalSupply: 1_000_000_000 },
   { symbol: 'TENDIES', name: 'TENDIES', address: '0x45242320DBB855EeA8Fd36804C6487E10E97FCF9', totalSupply: 1_000_000_000 },
   { symbol: 'PONS', name: 'PONS', address: '0x39dBED3a2bd333467115dE45665cC57F813C4571', totalSupply: 1_000_000_000 },
@@ -31,7 +32,7 @@ const RAW_TOKENS: RawToken[] = [
   { symbol: 'WISHBONE', name: 'WISHBONE', address: '0x77581054581B9c525E7dd7a0155DE43867532d03', totalSupply: 1_000_000_000 },
 ];
 
-const RAW_HOLDERS: Record<string, RawHolder[]> = {
+const RAW_HOLDERS: Record<string, RawHolderSeed[]> = {
   CASHCAT: [
     { address: '0x2dBAf98620aC5Bbe3441f756fEfF82702D095b1a', pct: 3.35 },
     { address: '0xeb877e7b5614B1Ca58c6b00eC4FFCd248eD414ee', pct: 1.7 },
@@ -157,7 +158,15 @@ const TIER_CONFIDENCE: Record<WalletTier, number> = {
 
 /** Build the immutable seed catalogs once at module load. */
 function build(): { tokens: TrackedToken[]; wallets: TrackedWallet[] } {
-  const tokens: TrackedToken[] = RAW_TOKENS.map((t) => ({
+  // Curated core + auto-fetched expansion, deduped by contract address.
+  const allTokens: RawTokenSeed[] = [...RAW_TOKENS];
+  const seenToken = new Set(RAW_TOKENS.map((t) => t.address.toLowerCase()));
+  for (const t of EXPANSION_TOKENS) {
+    if (!seenToken.has(t.address.toLowerCase())) allTokens.push(t);
+  }
+  const allHolders: Record<string, RawHolderSeed[]> = { ...RAW_HOLDERS, ...EXPANSION_HOLDERS };
+
+  const tokens: TrackedToken[] = allTokens.map((t) => ({
     address: t.address.toLowerCase(),
     symbol: t.symbol,
     name: t.name,
@@ -173,7 +182,7 @@ function build(): { tokens: TrackedToken[]; wallets: TrackedWallet[] } {
   }
   const byWallet = new Map<string, Acc>();
 
-  for (const [symbol, holders] of Object.entries(RAW_HOLDERS)) {
+  for (const [symbol, holders] of Object.entries(allHolders)) {
     holders.forEach((h, i) => {
       const rank = i + 1; // RAW_HOLDERS is ordered by holder rank (1..10)
       const key = h.address.toLowerCase();

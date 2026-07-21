@@ -32,6 +32,7 @@ function defaultRules(): AlertRule[] {
       minUsd: config.ALERT_MIN_USD,
       minConviction: 0,
       cooldownSeconds: config.ALERT_COOLDOWN_SECONDS,
+      minMarketCap: config.SOLO_MIN_MARKETCAP,
       maxMarketCap: config.SOLO_MAX_MARKETCAP,
       kinds: ['SOLO'],
       ignoredTokens: [],
@@ -119,10 +120,11 @@ export class AlertEngine {
     if (effective.length < rule.minWallets) return false;
     if (swarm.totalUsd < rule.minUsd) return false;
     if (swarm.conviction < rule.minConviction) return false;
-    // Low-cap-only rules (solo buys): require a known market cap under the cap.
+    // Market-cap band rules (solo buys): require a known cap within the band.
     if (rule.maxMarketCap != null) {
       if (swarm.marketCap <= 0 || swarm.marketCap > rule.maxMarketCap) return false;
     }
+    if (rule.minMarketCap != null && swarm.marketCap < rule.minMarketCap) return false;
     return true;
   }
 

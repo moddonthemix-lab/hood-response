@@ -9,8 +9,10 @@ before the broader market reacts. Detection runs entirely in memory for
 sub-second latency; Postgres and Redis are optional archival layers.
 
 Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
-**Robinhood Smart-Money Conviction List** (8 tokens, 72 real tracked wallets,
-5 cross-coin conviction wallets).
+**Robinhood Smart-Money Conviction List** — 15 tokens (8 curated + 7 auto-fetched
+top coins) and 131 real tracked wallets, tiered by holder rank, with 10
+cross-coin conviction wallets. Refresh/expand the list any time with
+`node scripts/fetch-holders.mjs SYMBOL …`.
 
 ---
 
@@ -21,7 +23,7 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **New-coin discovery** | ≥ N tracked wallets buy the **same token that isn't on the list** → 🆕 alert with the contract, and the token auto-registers on the dashboard. This is the early-signal mode: it follows the *wallets*, not a fixed token set. Toggle with `DISCOVERY_MODE` |
 | **Swarm detection** | ≥ N unique tracked wallets BUY the same token within a window → alert |
 | **Safety filter** | before any alert fires, the token is screened via GoPlus token-security (honeypot, buy/sell tax, mintable, ownership, LP lock — supported on Robinhood Chain) + a minimum DEX liquidity check; rugs/honeypots are suppressed (still shown on the dashboard, tagged). Tunable via `SAFETY_*`, degrades to a liquidity-only check if GoPlus is unreachable |
-| **Solo low-cap alerts** | a *single* tracked wallet buying a coin fires an alert too — but only when the token's market cap is under `SOLO_MAX_MARKETCAP` (default $100k), to catch early low-cap entries without noise from large caps |
+| **Solo low-cap alerts** | a *single* tracked wallet buying a coin fires an alert too — but only when the token's market cap is inside the band `SOLO_MIN_MARKETCAP`–`SOLO_MAX_MARKETCAP` (default $25k–$120k), to catch early low-cap entries without dust or large caps |
 | **Fresh-pair first entry** | fires when a qualifying-tier wallet (`FRESH_ENTRY_TIERS`, default alpha+beta) makes its *first-ever* buy of a token whose DEX pair is younger than `FRESH_PAIR_MAX_AGE_HOURS` (default 48h) — the purest "ground floor" signal |
 | **Real market cap** | market cap is fetched live from DexScreener at alert time (not just the cached/synthetic value), so every alert reports the true cap it was bought/sold into |
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |

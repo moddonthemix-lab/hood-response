@@ -141,7 +141,10 @@ async function main(): Promise<void> {
     const solo = aggregator.soloCandidate(swap);
     if (solo) {
       await enrichSwarm(solo);
-      if (solo.marketCap > 0 && solo.marketCap < config.SOLO_MAX_MARKETCAP) {
+      if (
+        solo.marketCap >= config.SOLO_MIN_MARKETCAP &&
+        solo.marketCap <= config.SOLO_MAX_MARKETCAP
+      ) {
         await recordAndMaybeAlert(solo);
       }
     }
