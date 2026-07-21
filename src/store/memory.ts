@@ -51,6 +51,9 @@ export class MemoryStore extends EventEmitter {
   readonly tokensByAddress = new Map<string, TrackedToken>();
   readonly tokensBySymbol = new Map<string, TrackedToken>();
   readonly wallets = new Map<string, TrackedWallet>();
+  /** Coins (upper-case symbols) whose wallets are currently muted. Runtime-
+   *  toggleable via the API; seeded from MUTE_WALLET_TOKENS. */
+  readonly mutedTokens = new Set<string>();
 
   private readonly swaps = new Ring<SwapEvent>(2000);
   private readonly swarms = new Ring<Swarm>(500);
@@ -85,10 +88,23 @@ export class MemoryStore extends EventEmitter {
       this.tokensBySymbol.set(t.symbol, t);
     }
     for (const w of SEED_WALLETS) this.wallets.set(w.address, w);
+    for (const sym of config.mutedWalletTokens) this.mutedTokens.add(sym.toUpperCase());
   }
 
   isTracked(wallet: string): boolean {
     return this.wallets.has(wallet.toLowerCase());
+  }
+
+  /**
+   * A wallet is muted only when EVERY coin it is a tracked top-holder of is in
+   * the muted set — so silencing "HMM" drops wallets sourced purely from HMM,
+   * but keeps any wallet that also holds another tracked gem.
+   */
+  isWalletMuted(wallet: string): boolean {
+    if (this.mutedTokens.size === 0) return false;
+    const w = this.wallets.get(wallet.toLowerCase());
+    if (!w || w.holdsTokens.length === 0) return false;
+    return w.holdsTokens.every((c) => this.mutedTokens.has(c.toUpperCase()));
   }
 
   /**

@@ -116,6 +116,12 @@ const schema = z.object({
         'COIN,PLTR,ORCL,CRWV,SNDK,SPCX,USAR,BE,HOOD,SPY,QQQ',
     ),
 
+  // Mute tracked wallets by the coin they were sourced from (e.g. "HMM"). A
+  // wallet is silenced only when EVERY coin it is a tracked top-holder of is
+  // muted, so cross-conviction wallets that also hold other gems keep firing.
+  // Comma-separated symbols, case-insensitive. Runtime-toggleable via /api/muted.
+  MUTE_WALLET_TOKENS: z.string().default(''),
+
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
@@ -169,6 +175,9 @@ export const config = {
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
   ),
+  mutedWalletTokens: env.MUTE_WALLET_TOKENS.split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:

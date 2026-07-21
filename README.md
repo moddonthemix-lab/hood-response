@@ -33,6 +33,7 @@ cross-coin conviction wallets. Refresh/expand the list any time with
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
 | **Noise filter** | settlement/quote tokens (WETH, USDC, USDG…) and tokenised equities (AAPL, TSLA, NVDA…) are dropped before detection via `IGNORE_SYMBOLS`, so the feed and alerts stay focused on real gems (no spurious "sold WETH" leg on every buy) |
 | **Conviction refinement** | after detection, conviction is re-scored with the *real* market cap, liquidity and momentum — low caps and healthy liquidity get a boost, dangerously thin liquidity a penalty — so the best low-cap gems rank highest |
+| **Mutable wallet groups** | turn a whole coin's tracked wallets off/on at runtime — click the coin in the dashboard's **Wallet Groups** card, or `POST`/`DELETE /api/muted/:symbol` (seed defaults with `MUTE_WALLET_TOKENS`). A wallet is only silenced when *every* coin it's a top-holder of is muted, so cross-conviction wallets that also hold other gems keep firing. Muted wallets drop out before detection — they never form or grow a swarm, solo, or entry |
 | **Wallet tiers** | each wallet is tiered by its best top-10 holder rank across the tracked coins — **alpha** (rank 1–3), **beta** (4–6), **chroma** (7–9), **delta** (10) — which anchors its confidence and feeds the conviction score; alert makeup reads e.g. "2 alpha · 1 beta" |
 | **Conviction score** | 0–100 from wallet quality (tier), count, capital, velocity, liquidity, market cap, historical accuracy, buy/sell ratio |
 | **Live prices & market cap** | real USD price / market cap / pair link from DexScreener (cached, background-refreshed, chain-filtered) when `DEXSCREENER_CHAIN` is set; deterministic synthetic fallback (marked `est`) otherwise |
@@ -151,6 +152,8 @@ Invalid configuration fails fast at startup with a readable message.
 | GET | `/api/config` | effective non-secret config |
 | GET | `/api/tokens` | tracked tokens + per-token stats |
 | GET/POST/DELETE | `/api/wallets[/:address]` | manage tracked wallets |
+| GET | `/api/muted` | current muted wallet groups + affected wallet count |
+| POST/DELETE | `/api/muted/:symbol` | mute / unmute a coin's wallets at runtime (e.g. `HMM`) |
 | GET | `/api/swaps` `/api/swarms` `/api/alerts` | recent activity (`?limit=`) |
 | POST | `/api/test-alert` | send a sample alert to every configured channel (verify a new channel instantly) |
 | GET | `/api/leaderboard/wallets` `/api/leaderboard/tokens` | rankings |

@@ -147,6 +147,32 @@ describe('Aggregator', () => {
     expect(agg.firstEntryCandidate(swap(delta, otherToken, 'BUY', now))).toBeNull();
   });
 
+  it('mutes a wallet group so its wallets drop out, and restores them on unmute', () => {
+    const { store, agg, token } = ctx;
+    const now = Date.now();
+    // A wallet sourced from a single coin — muting that coin should silence it.
+    const solo = [...store.wallets.values()].find((w) => w.holdsTokens.length === 1)!;
+    const coin = solo.holdsTokens[0]!;
+
+    expect(agg.soloCandidate(swap(solo.address, token, 'BUY', now))).not.toBeNull();
+
+    store.mutedTokens.add(coin.toUpperCase());
+    expect(store.isWalletMuted(solo.address)).toBe(true);
+    // Muted → ineligible for solo, swarm, and first-entry alike.
+    expect(agg.soloCandidate(swap(solo.address, token, 'BUY', now + 61_000))).toBeNull();
+    expect(agg.ingest(swap(solo.address, token, 'BUY', now + 61_000))).toHaveLength(0);
+
+    // A cross-conviction wallet (holds more than the muted coin) stays active.
+    const cross = [...store.wallets.values()].find(
+      (w) => w.holdsTokens.length > 1 && w.holdsTokens.some((c) => c.toUpperCase() === coin.toUpperCase()),
+    );
+    if (cross) expect(store.isWalletMuted(cross.address)).toBe(false);
+
+    store.mutedTokens.delete(coin.toUpperCase());
+    expect(store.isWalletMuted(solo.address)).toBe(false);
+    expect(agg.soloCandidate(swap(solo.address, token, 'BUY', now + 122_000))).not.toBeNull();
+  });
+
   it('detects rotation when sellers of one token buy another', () => {
     const { store, agg, wallets } = ctx;
     const tokenA = store.tokensBySymbol.get('CASHCAT')!.address;

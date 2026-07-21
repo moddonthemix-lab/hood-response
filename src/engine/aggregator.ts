@@ -75,7 +75,11 @@ export class Aggregator {
       const token = this.store.tokensByAddress.get(swap.token);
       if (token?.stable) return false;
     }
-    return this.store.isTracked(swap.wallet);
+    if (!this.store.isTracked(swap.wallet)) return false;
+    // Muted wallet groups (e.g. HMM turned off) — drop before detection so they
+    // never form or grow a swarm, solo, or first-entry.
+    if (this.store.isWalletMuted(swap.wallet)) return false;
+    return true;
   }
 
   /** Feed one swap; returns any swarms detected as a result. */

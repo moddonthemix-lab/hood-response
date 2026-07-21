@@ -105,6 +105,11 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   </section>
 
   <section class="card full">
+    <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
+    <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
+  </section>
+
+  <section class="card full">
     <h2>Tracked Wallets <span class="mono" id="wallet-count"></span></h2>
     <div class="body"><table id="wallets"><thead><tr><th>Tier</th><th>Label</th><th class="num">Rank</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
   </section>
@@ -195,6 +200,21 @@ async function loadTables(){
     wb.appendChild(tr); }
 }
 
+async function loadMuted(){
+  let st; try{ st=await fetch('/api/muted').then(r=>r.json()); }catch(e){ return; }
+  const muted=new Set(st.muted||[]);
+  const g=$('groups'); g.innerHTML='';
+  for(const sym of (st.groups||[])){ const on=!muted.has(sym);
+    const b=document.createElement('button'); b.textContent=(on?'🟢 ':'⛔ ')+sym;
+    b.title=on?'wallets active — click to mute':'wallets muted — click to enable';
+    b.style.cssText='cursor:pointer;font:12px inherit;padding:5px 11px;border-radius:6px;border:1px solid var(--line);background:'+(on?'#0d2a17':'#2b1113')+';color:'+(on?'var(--green)':'var(--red)');
+    b.onclick=async()=>{ b.disabled=true; await fetch('/api/muted/'+encodeURIComponent(sym),{method:muted.has(sym)?'DELETE':'POST'}); await loadMuted(); };
+    g.appendChild(b);
+  }
+  if(!(st.groups||[]).length) g.innerHTML='<div class="empty">no tracked coins</div>';
+  $('muted-note').textContent = st.mutedWalletCount ? ('— '+st.mutedWalletCount+' wallets muted') : '— all wallets active';
+}
+
 function applyStats(m){
   if(!m) return;
   $('m-block').textContent=m.lastBlock||'–';
@@ -222,6 +242,7 @@ async function boot(){
   const ae=$('alerts'); if(alerts.length){ clearEmpty(ae); alerts.reverse().forEach(a=>ae.prepend(alertRow(a))); }
 
   await loadTables();
+  await loadMuted();
   setInterval(loadTables, 8000);
 
   const es=new EventSource('/events');

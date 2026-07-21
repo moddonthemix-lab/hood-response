@@ -156,6 +156,30 @@ export async function buildServer(
     return { deleted: address };
   });
 
+  // ── Muted wallet groups (turn a coin's wallets off/on at runtime) ──────────────
+  const mutedState = () => {
+    const muted = [...store.mutedTokens].sort();
+    let mutedWalletCount = 0;
+    for (const w of store.wallets.values()) {
+      if (store.isWalletMuted(w.address)) mutedWalletCount += 1;
+    }
+    const groups = [...store.tokensBySymbol.keys()].sort();
+    return { muted, mutedWalletCount, groups };
+  };
+  app.get('/api/muted', async () => mutedState());
+  app.post('/api/muted/:symbol', async (req) => {
+    const sym = (req.params as { symbol: string }).symbol.toUpperCase();
+    store.mutedTokens.add(sym);
+    logger.info({ symbol: sym }, 'muted wallet group');
+    return mutedState();
+  });
+  app.delete('/api/muted/:symbol', async (req) => {
+    const sym = (req.params as { symbol: string }).symbol.toUpperCase();
+    store.mutedTokens.delete(sym);
+    logger.info({ symbol: sym }, 'unmuted wallet group');
+    return mutedState();
+  });
+
   // ── Feeds ────────────────────────────────────────────────────────────────────
   app.get('/api/swaps', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
