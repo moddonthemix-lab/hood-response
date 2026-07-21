@@ -6,7 +6,8 @@ import { logger } from '../logger.js';
 import type { MemoryStore } from '../store/memory.js';
 import type { AlertEngine } from '../engine/alertEngine.js';
 import type { Aggregator } from '../engine/aggregator.js';
-import { configuredChannels } from '../notify/index.js';
+import type { PerformanceTracker } from '../engine/performance.js';
+import { configuredChannels, dispatch } from '../notify/index.js';
 import type { Alert, AlertRule, Swarm, SwapEvent, WalletCategory } from '../types.js';
 import { DASHBOARD_HTML } from './dashboard.js';
 
@@ -68,6 +69,7 @@ export async function buildServer(
   store: MemoryStore,
   engine: AlertEngine,
   aggregator: Aggregator,
+  performance?: PerformanceTracker,
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
@@ -156,6 +158,37 @@ export async function buildServer(
     return { deleted: address };
   });
 
+  // ── Muted wallet groups (turn a coin's wallets off/on at runtime) ──────────────
+  const mutedState = () => {
+    const muted = [...store.mutedTokens].sort();
+    let mutedWalletCount = 0;
+    for (const w of store.wallets.values()) {
+      if (store.isWalletMuted(w.address)) mutedWalletCount += 1;
+    }
+    const groups = [...store.tokensBySymbol.keys()].sort();
+    return { muted, mutedWalletCount, groups };
+  };
+  app.get('/api/muted', async () => mutedState());
+  app.post('/api/muted/:symbol', async (req) => {
+    const sym = (req.params as { symbol: string }).symbol.toUpperCase();
+    store.mutedTokens.add(sym);
+    logger.info({ symbol: sym }, 'muted wallet group');
+    return mutedState();
+  });
+  app.delete('/api/muted/:symbol', async (req) => {
+    const sym = (req.params as { symbol: string }).symbol.toUpperCase();
+    store.mutedTokens.delete(sym);
+    logger.info({ symbol: sym }, 'unmuted wallet group');
+    return mutedState();
+  });
+
+  // ── Performance / outcomes ─────────────────────────────────────────────────────
+  app.get('/api/performance', async (req) => {
+    if (!performance) return { enabled: false, calls: [], summary: null };
+    const limit = clampLimit((req.query as { limit?: string }).limit);
+    return { enabled: true, summary: performance.summary(), calls: performance.list().slice(0, limit) };
+  });
+
   // ── Feeds ────────────────────────────────────────────────────────────────────
   app.get('/api/swaps', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
@@ -168,6 +201,51 @@ export async function buildServer(
   app.get('/api/alerts', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
     return store.recentAlerts(limit).map(redactAlert);
+  });
+
+  // Send a sample alert to every configured channel so a new Telegram channel /
+  // Discord webhook can be verified instantly instead of waiting for a real gem.
+  app.post('/api/test-alert', async (_req, reply) => {
+    const now = Date.now();
+    const sample: Swarm = {
+      id: cryptoId(),
+      kind: 'BUY',
+      token: '0x000000000000000000000000000000000000dead',
+      tokenSymbol: 'TESTGEM',
+      walletCount: 3,
+      wallets: [],
+      walletSummary: '2 alpha · 1 beta',
+      totalUsd: 4200,
+      marketCap: 68_000,
+      newToken: false,
+      dexUrl: 'https://dexscreener.com/robinhood',
+      priceLive: true,
+      priceUsd: 0.0042,
+      liquidityUsd: 31_000,
+      dex: 'uniswap',
+      pairAgeHours: 3.2,
+      freshPair: false,
+      conviction: 74,
+      convictionBreakdown: {
+        walletQuality: 0,
+        walletCount: 0,
+        totalCapital: 0,
+        velocity: 0,
+        liquidity: 0,
+        marketCap: 0,
+        historicalAccuracy: 0,
+        buySellRatio: 0,
+      },
+      windowSeconds: 42,
+      firstSeen: now,
+      lastSeen: now,
+    };
+    const channels = configuredChannels();
+    if (channels.length === 0) {
+      return reply.code(400).send({ error: 'no notification channels configured' });
+    }
+    const deliveries = await dispatch(sample);
+    return { sent: true, channels, deliveries };
   });
 
   // ── Leaderboards ──────────────────────────────────────────────────────────────

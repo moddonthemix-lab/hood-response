@@ -158,6 +158,22 @@ export interface Swarm {
   dex?: string | null;
   /** Other tracked coins the swarm's wallets also hold (cross-conviction). */
   alsoHold?: string[];
+  /** How many alerts this token has produced within the repeat window (this
+   *  alert included). 1 = first alert in the window; 2 = second ("x2"); etc.
+   *  Surfaces repeated/escalating interest that the per-token cooldown hides. */
+  repeatCount?: number;
+  /** How many DISTINCT tracked wallets have driven this token's alerts within
+   *  the window — the real multi-party signal (one busy wallet re-buying counts
+   *  once, so it can't masquerade as a swarm). */
+  repeatWallets?: number;
+  /** Price change (%) since the previous alert on this token in the window, or
+   *  null when there was no prior alert / price is unknown. */
+  repeatPriceChangePct?: number | null;
+  /** True when this repeat is driven by a NEW distinct wallet (a different top
+   *  holder joining), not the same wallet re-buying — the strongest repeat. */
+  repeatNewWallet?: boolean;
+  /** The rolling repeat window in minutes (for display, e.g. "2nd in 35m"). */
+  repeatWindowMinutes?: number;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

@@ -97,6 +97,21 @@ const schema = z.object({
   FRESH_PAIR_MAX_AGE_HOURS: num(48),
   FRESH_ENTRY_TIERS: z.string().default('alpha,beta'),
   ALERT_COOLDOWN_SECONDS: num(120),
+  // Repeat/escalation tracking: how many alerts a token has fired inside this
+  // rolling window is counted and surfaced ("2nd alert in 35m"), and each
+  // repeat past the first nudges conviction up. This is what tells you a token
+  // keeps drawing tracked-wallet interest even though the per-token cooldown
+  // hides the individual re-fires.
+  REPEAT_WINDOW_MINUTES: num(35),
+  // Outcome tracking: after each alert fires, follow the token's price and
+  // record the peak + milestone returns, so signal quality is measured from
+  // real results (multi-wallet vs solo, repeat vs single) instead of guessed.
+  PERFORMANCE_TRACKING: bool(true),
+  PERF_SAMPLE_MINUTES: num(2),
+  PERF_TRACK_HOURS: num(24),
+  // A call counts as a "win" for the win-rate stat when its peak return reaches
+  // this %. Tune to whatever "runner" means to you.
+  PERF_WIN_THRESHOLD_PCT: num(50),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"
@@ -109,6 +124,12 @@ const schema = z.object({
         'AAPL,TSLA,NVDA,GOOGL,GOOG,META,MSFT,AMZN,AMD,INTC,MU,NFLX,DIS,' +
         'COIN,PLTR,ORCL,CRWV,SNDK,SPCX,USAR,BE,HOOD,SPY,QQQ',
     ),
+
+  // Mute tracked wallets by the coin they were sourced from (e.g. "HMM"). A
+  // wallet is silenced only when EVERY coin it is a tracked top-holder of is
+  // muted, so cross-conviction wallets that also hold other gems keep firing.
+  // Comma-separated symbols, case-insensitive. Runtime-toggleable via /api/muted.
+  MUTE_WALLET_TOKENS: z.string().default(''),
 
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
@@ -163,6 +184,9 @@ export const config = {
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
   ),
+  mutedWalletTokens: env.MUTE_WALLET_TOKENS.split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:

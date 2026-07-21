@@ -13,17 +13,22 @@ function makeEngine(): { store: MemoryStore; agg: Aggregator; engine: AlertEngin
   return { store, agg, engine };
 }
 
-function soloSwarm(token: string, marketCap: number): Swarm {
+function soloSwarm(
+  token: string,
+  marketCap: number,
+  opts: { wallet?: string; price?: number } = {},
+): Swarm {
   return {
     id: 'swarm-' + Math.random().toString(36).slice(2),
     kind: 'SOLO',
     token,
     tokenSymbol: 'GEM',
     walletCount: 1,
-    wallets: ['0x1'],
+    wallets: [opts.wallet ?? '0x1'],
     walletSummary: '1 retail',
     totalUsd: 500,
     marketCap,
+    priceUsd: opts.price ?? null,
     conviction: 12,
     convictionBreakdown: {
       walletQuality: 0,
@@ -78,5 +83,64 @@ describe('AlertEngine', () => {
     const fired = await ctx.engine.evaluate(soloSwarm('0xzz', 40_000));
     // Only the solo rule should fire, never the default BUY/SELL/ROTATION rule.
     expect(fired.every((a) => a.ruleId === 'solo-lowcap')).toBe(true);
+  });
+
+  it('escalates on DISTINCT wallets, reports % change since last alert, flags new holder', async () => {
+    const first = soloSwarm('0xrepeat', 50_000, { wallet: '0xaaa', price: 100 });
+    await ctx.engine.evaluate(first);
+    expect(first.repeatCount).toBe(1);
+    expect(first.repeatWallets).toBe(1);
+    expect(first.repeatNewWallet).toBe(false);
+    expect(first.repeatPriceChangePct).toBeNull();
+    expect(first.conviction).toBe(12); // no escalation on the first
+
+    // A DIFFERENT top holder buys the same coin, price up 10% → strongest repeat.
+    const second = soloSwarm('0xrepeat', 50_000, { wallet: '0xbbb', price: 110 });
+    await ctx.engine.evaluate(second);
+    expect(second.repeatCount).toBe(2);
+    expect(second.repeatWallets).toBe(2);
+    expect(second.repeatNewWallet).toBe(true);
+    expect(second.repeatPriceChangePct).toBe(10);
+    expect(second.repeatWindowMinutes).toBeGreaterThan(0);
+    expect(second.conviction).toBe(20); // +4 distinct-wallet + 4 new-holder
+
+    // A third distinct holder, price down vs the last alert (110 → 99 = -10%).
+    const third = soloSwarm('0xrepeat', 50_000, { wallet: '0xccc', price: 99 });
+    await ctx.engine.evaluate(third);
+    expect(third.repeatCount).toBe(3);
+    expect(third.repeatWallets).toBe(3);
+    expect(third.repeatPriceChangePct).toBe(-10);
+    expect(third.conviction).toBe(24); // +8 distinct-wallet + 4 new-holder
+
+    // A different token keeps its own independent count.
+    const other = soloSwarm('0xother', 50_000, { wallet: '0xaaa' });
+    await ctx.engine.evaluate(other);
+    expect(other.repeatCount).toBe(1);
+  });
+
+  it('suppresses the same busy wallet re-buying, but lets a different wallet through', async () => {
+    // Even with no cooldown, a lone repeat from an already-seen wallet is the
+    // noise we want gone — while a NEW wallet on the same token always fires.
+    const solo = ctx.engine.listRules().find((r) => r.id === 'solo-lowcap')!;
+    ctx.engine.upsertRule({ ...solo, cooldownSeconds: 0 });
+
+    const first = soloSwarm('0xbusy', 50_000, { wallet: '0xhot' });
+    expect(await ctx.engine.evaluate(first)).toHaveLength(1);
+
+    const again = soloSwarm('0xbusy', 50_000, { wallet: '0xhot' });
+    expect(await ctx.engine.evaluate(again)).toHaveLength(0); // same wallet → suppressed
+    expect(again.repeatCount).toBeUndefined();
+
+    const other = soloSwarm('0xbusy', 50_000, { wallet: '0xnew' });
+    expect(await ctx.engine.evaluate(other)).toHaveLength(1); // different wallet → fires
+    expect(other.repeatNewWallet).toBe(true);
+    expect(other.repeatWallets).toBe(2);
+  });
+
+  it('does not count a swarm that fires no alert', async () => {
+    // Over the cap → suppressed → must not consume a repeat slot for the token.
+    const over = soloSwarm('0xnofire', 250_000);
+    await ctx.engine.evaluate(over);
+    expect(over.repeatCount).toBeUndefined();
   });
 });

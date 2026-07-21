@@ -69,6 +69,14 @@ const SINGLE_WALLET_KINDS = new Set(['SOLO', 'ENTRY']);
 export class AlertEngine {
   /** cooldown key -> last fire timestamp (ms). */
   private readonly cooldowns = new Map<string, number>();
+  /** token -> one entry per alert fired for it inside the repeat window, each
+   *  carrying its timestamp and the wallets that drove it. Powers both the
+   *  repeat count and the DISTINCT-wallet count, and lets a brand-new wallet
+   *  bypass the cooldown so one busy wallet can't hide the others. */
+  private readonly repeats = new Map<
+    string,
+    { at: number; wallets: string[]; price: number | null }[]
+  >();
 
   constructor(
     private readonly store: MemoryStore,
@@ -128,21 +136,100 @@ export class AlertEngine {
     return true;
   }
 
-  private cooled(rule: AlertRule, swarm: Swarm, now: number): boolean {
+  /** Whether the per-rule/token/kind cooldown has elapsed. Pure — no mutation,
+   *  so it can be combined with the new-wallet bypass before committing. */
+  private isCooled(rule: AlertRule, swarm: Swarm, now: number): boolean {
     const key = `${rule.id}:${swarm.token}:${swarm.kind}`;
     const last = this.cooldowns.get(key) ?? 0;
-    if (now - last < rule.cooldownSeconds * 1000) return false;
-    this.cooldowns.set(key, now);
-    return true;
+    return now - last >= rule.cooldownSeconds * 1000;
+  }
+
+  /** Stamp the cooldown for this rule/token/kind at `now`. */
+  private touchCooldown(rule: AlertRule, swarm: Swarm, now: number): void {
+    this.cooldowns.set(`${rule.id}:${swarm.token}:${swarm.kind}`, now);
+  }
+
+  /** This token's alerts still inside the repeat window (pruned + stored). */
+  private freshEntries(
+    token: string,
+    now: number,
+  ): { at: number; wallets: string[]; price: number | null }[] {
+    const windowMs = config.REPEAT_WINDOW_MINUTES * 60_000;
+    const fresh = (this.repeats.get(token) ?? []).filter((e) => now - e.at < windowMs);
+    this.repeats.set(token, fresh);
+    // Bound memory on a long-running process with many discovered tokens.
+    if (this.repeats.size > 5_000) {
+      for (const [tok, entries] of this.repeats) {
+        if (entries.every((e) => now - e.at >= windowMs)) this.repeats.delete(tok);
+      }
+    }
+    return fresh;
+  }
+
+  /** The distinct wallets that have already driven this token's alerts. */
+  private knownWallets(entries: { wallets: string[] }[]): Set<string> {
+    const set = new Set<string>();
+    for (const e of entries) for (const w of e.wallets) set.add(w);
+    return set;
+  }
+
+  /** Escalation conviction bonus keyed on DISTINCT wallets: +4 per wallet past
+   *  the first, capped at +12 — so one busy wallet re-buying earns nothing, but
+   *  a coin drawing several different top holders climbs the rankings. */
+  private escalationBoost(distinctWallets: number): number {
+    return Math.min(12, Math.max(0, distinctWallets - 1) * 4);
   }
 
   /** Evaluate a detected swarm against all rules and fire alerts as needed. */
   async evaluate(swarm: Swarm): Promise<Alert[]> {
     const now = Date.now();
     const fired: Alert[] = [];
+    const isMulti = !SINGLE_WALLET_KINDS.has(swarm.kind);
+    let counted = false;
     for (const rule of this.store.rules.values()) {
       if (!this.matches(rule, swarm)) continue;
-      if (!this.cooled(rule, swarm, now)) continue;
+
+      // Wallet-aware gating so one busy wallet can't hog the bot and hide the
+      // others: a swarm carrying a NEW distinct wallet for this token always
+      // gets through (that's the "what are the other wallets doing" signal),
+      // even inside the cooldown. Otherwise a multi-wallet swarm may re-fire on
+      // the normal cooldown, but a lone repeat from an already-seen wallet (the
+      // busy solo buyer) is suppressed.
+      const entries = this.freshEntries(swarm.token, now);
+      const known = this.knownWallets(entries);
+      const hasNewWallet = swarm.wallets.some((w) => !known.has(w));
+      const cooledNow = this.isCooled(rule, swarm, now);
+      if (!hasNewWallet && !(isMulti && cooledNow)) continue;
+      this.touchCooldown(rule, swarm, now);
+
+      // First rule that actually fires for this swarm does the repeat accounting
+      // once: count of alerts + DISTINCT wallets in the window, price change
+      // since the previous alert, and whether a new holder drove this one.
+      if (!counted) {
+        counted = true;
+        const prev = entries[entries.length - 1];
+        const prevPrice = prev?.price ?? null;
+        const nowPrice = swarm.priceUsd ?? null;
+        swarm.repeatPriceChangePct =
+          entries.length > 0 && prevPrice != null && nowPrice != null && prevPrice > 0
+            ? Math.round(((nowPrice - prevPrice) / prevPrice) * 1000) / 10
+            : null;
+        swarm.repeatNewWallet = entries.length > 0 && hasNewWallet;
+
+        entries.push({ at: now, wallets: swarm.wallets, price: nowPrice });
+        this.repeats.set(swarm.token, entries);
+
+        swarm.repeatCount = entries.length;
+        swarm.repeatWallets = this.knownWallets(entries).size;
+        swarm.repeatWindowMinutes = config.REPEAT_WINDOW_MINUTES;
+
+        // Escalate on distinct wallets, with an extra nudge when a brand-new
+        // top holder just joined (a different holder is more attractive than
+        // the same wallet buying again).
+        const boost =
+          this.escalationBoost(swarm.repeatWallets) + (swarm.repeatNewWallet ? 4 : 0);
+        if (boost > 0) swarm.conviction = Math.min(100, swarm.conviction + boost);
+      }
 
       const alert: Alert = {
         id: randomUUID(),
@@ -154,7 +241,15 @@ export class AlertEngine {
       };
       this.store.recordAlert(alert);
       logger.info(
-        { rule: rule.name, kind: swarm.kind, token: swarm.tokenSymbol, conviction: swarm.conviction },
+        {
+          rule: rule.name,
+          kind: swarm.kind,
+          token: swarm.tokenSymbol,
+          conviction: swarm.conviction,
+          repeat: swarm.repeatCount,
+          repeatWallets: swarm.repeatWallets,
+          newWallet: swarm.repeatNewWallet,
+        },
         'ALERT fired',
       );
       // Deliver asynchronously; attach results when they land.

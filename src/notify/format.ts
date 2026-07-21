@@ -50,6 +50,38 @@ function convBar(score: number): string {
   return '🟩'.repeat(filled) + '⬜'.repeat(5 - filled);
 }
 
+/** 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th" … */
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+/** Prominent repeat/escalation lines, or [] when this is the first alert on the
+ *  token inside the window (nothing to escalate). A repeat driven by a NEW
+ *  distinct holder is highlighted harder than the same wallet buying again, and
+ *  the price move since the previous alert is shown when known. */
+function repeatLines(s: Swarm): string[] {
+  const n = s.repeatCount ?? 0;
+  if (n < 2) return [];
+  const win = s.repeatWindowMinutes ?? 35;
+  const w = s.repeatWallets ?? n;
+  const lines: string[] = [];
+  if (s.repeatNewWallet) {
+    // A different top holder just joined — the strongest repeat signal.
+    lines.push(`🚨 NEW HOLDER IN 🪰🔥 · ${ordinal(n)} alert · ${w} wallet${w > 1 ? 's' : ''} in ${win}m`);
+  } else {
+    const heat = n >= 4 ? '🔥🔥' : '🔥';
+    lines.push(`🔁 REPEAT x${n} ${heat} · ${ordinal(n)} alert in ${win}m`);
+  }
+  const pc = s.repeatPriceChangePct;
+  if (pc != null) {
+    const arrow = pc > 0 ? '📈' : pc < 0 ? '📉' : '➡️';
+    lines.push(`${arrow} ${pc > 0 ? '+' : ''}${pc}% since last alert`);
+  }
+  return lines;
+}
+
 function typeTitle(s: Swarm): string {
   const nu = s.newToken ? '🆕 NEW COIN · ' : '';
   switch (s.kind) {
@@ -77,7 +109,9 @@ function cardLines(s: Swarm): string[] {
   const buys = s.momentum?.buys ?? null;
   const sells = s.momentum?.sells ?? null;
 
+  const repeat = repeatLines(s);
   const lines: string[] = [
+    ...(repeat.length ? [...repeat, ``] : []),
     `${marker} ${sym} [${compact(s.marketCap)}] $${sym}`,
     `⛓️ Robinhood · ${s.dex ?? 'dex'}`,
     `💰 $${fmtPrice(s.priceUsd)}`,

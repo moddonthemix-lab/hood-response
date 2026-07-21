@@ -84,6 +84,11 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
     <div class="body" id="newcoins"><div class="empty">no new-coin swarms yet</div></div>
   </section>
 
+  <section class="card full">
+    <h2>🏆 Best Calls <span class="mono" id="perf-note">— outcome of each alert (peak vs entry)</span></h2>
+    <div class="body" id="perf"><div class="empty">no tracked calls yet — fills in after live alerts</div></div>
+  </section>
+
   <section class="card">
     <h2>Live Feed <span class="mono" id="feed-count"></span></h2>
     <div class="body" id="feed"><div class="empty">waiting for swaps…</div></div>
@@ -102,6 +107,11 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   <section class="card">
     <h2>Token Leaderboard</h2>
     <div class="body"><table id="tokens"><thead><tr><th>Token</th><th class="num">Buys</th><th class="num">Sells</th><th class="num">Swarms</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="card full">
+    <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
+    <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
   </section>
 
   <section class="card full">
@@ -139,11 +149,17 @@ const newBadge = (s) => s.newToken ? '<span class="tag NEW">NEW</span>' : '';
 const safeBadge = (s) => !s.safety ? '' : (!s.safety.ok ? '<span class="tag UNSAFE" title="'+(s.safety.hardFails||[]).join(', ')+'">RUG?</span>' : ((s.safety.warnings&&s.safety.warnings.length) ? '<span class="tag WARN" title="'+s.safety.warnings.join(', ')+'">⚠</span>' : '<span class="tag" style="color:var(--green)">✓</span>'));
 const momBadge = (s) => (s.momentum && s.momentum.confirmed) ? '<span class="tag" style="color:#f0b429" title="volume+momentum confirmed">🔥</span>' : '';
 const freshBadge = (s) => (s.freshPair && s.kind!=='ENTRY') ? '<span class="tag ENTRY" title="fresh pair">🌱</span>' : '';
+const repeatBadge = (s) => { if(!(s.repeatCount && s.repeatCount>1)) return '';
+  const w=s.repeatWallets||s.repeatCount; const pc=(s.repeatPriceChangePct!=null)?' '+(s.repeatPriceChangePct>0?'+':'')+s.repeatPriceChangePct+'%':'';
+  const title=w+' distinct wallets · '+s.repeatCount+' alerts within '+(s.repeatWindowMinutes||35)+'m'+(s.repeatPriceChangePct!=null?' · '+(s.repeatPriceChangePct>0?'+':'')+s.repeatPriceChangePct+'% since last':'');
+  const label=s.repeatNewWallet?'🚨🪰 NEW HOLDER x'+w:'🔁x'+s.repeatCount;
+  const bg=s.repeatNewWallet?'#7a1fa2':'#c0392b';
+  return '<span class="tag" style="color:#fff;background:'+bg+'" title="'+title+'">'+label+pc+'</span>'; };
 
 function swarmRow(s){
   const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
@@ -153,7 +169,7 @@ function swarmRow(s){
 function alertRow(a){
   const s=a.swarm; const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
@@ -189,6 +205,47 @@ async function loadTables(){
     wb.appendChild(tr); }
 }
 
+function perfRow(c){
+  const d=document.createElement('div'); d.className='row';
+  const g=c.maxGainPct, now=c.lastGainPct; const gc=g>=50?'hi':g>=0?'mid':'lo';
+  const tags='<span class="tag '+c.kind+'">'+c.kind+'</span>'+
+    '<span class="tag" style="background:#12283a;color:var(--accent)" title="wallets in the alert">'+c.walletCount+'w</span>'+
+    (c.repeatCount>1?'<span class="tag" style="background:'+(c.newHolder?'#7a1fa2':'#c0392b')+';color:#fff" title="repeat alerts">🔁x'+c.repeatCount+'</span>':'');
+  const ageMin=Math.floor((Date.now()-c.entryAt)/60000); const age=ageMin<60?ageMin+'m':Math.floor(ageMin/60)+'h';
+  d.innerHTML=tags+'<span class="sym">'+dexLink(c.token,c.tokenSymbol)+'</span>'+
+    '<span class="grow mono">'+usd(c.entryMarketCap)+' → '+usd(c.lastMarketCap||c.entryMarketCap)+' MC · '+age+' ago</span>'+
+    '<span class="conv '+gc+'" title="peak return since alert">▲ '+(g>=0?'+':'')+g+'%</span>'+
+    '<span class="mono" title="current return">now '+(now>=0?'+':'')+now+'%</span>';
+  return d;
+}
+async function loadPerformance(){
+  let d; try{ d=await fetch('/api/performance?limit=25').then(r=>r.json()); }catch(e){ return; }
+  const el=$('perf');
+  if(!d.enabled){ el.innerHTML='<div class="empty">performance tracking off</div>'; return; }
+  const calls=d.calls||[]; el.innerHTML='';
+  if(!calls.length){ el.innerHTML='<div class="empty">no tracked calls yet — fills in after live alerts</div>'; }
+  else calls.forEach(c=>el.appendChild(perfRow(c)));
+  const s=d.summary;
+  if(s){ const mw=(s.byWalletCount||[])[0], rp=(s.byRepeat||[])[0];
+    $('perf-note').textContent='— '+s.total+' calls · multi-wallet win '+(mw?mw.winRatePct:0)+'% · repeat win '+(rp?rp.winRatePct:0)+'% (peak ≥'+s.winThresholdPct+'%)';
+  }
+}
+
+async function loadMuted(){
+  let st; try{ st=await fetch('/api/muted').then(r=>r.json()); }catch(e){ return; }
+  const muted=new Set(st.muted||[]);
+  const g=$('groups'); g.innerHTML='';
+  for(const sym of (st.groups||[])){ const on=!muted.has(sym);
+    const b=document.createElement('button'); b.textContent=(on?'🟢 ':'⛔ ')+sym;
+    b.title=on?'wallets active — click to mute':'wallets muted — click to enable';
+    b.style.cssText='cursor:pointer;font:12px inherit;padding:5px 11px;border-radius:6px;border:1px solid var(--line);background:'+(on?'#0d2a17':'#2b1113')+';color:'+(on?'var(--green)':'var(--red)');
+    b.onclick=async()=>{ b.disabled=true; await fetch('/api/muted/'+encodeURIComponent(sym),{method:muted.has(sym)?'DELETE':'POST'}); await loadMuted(); };
+    g.appendChild(b);
+  }
+  if(!(st.groups||[]).length) g.innerHTML='<div class="empty">no tracked coins</div>';
+  $('muted-note').textContent = st.mutedWalletCount ? ('— '+st.mutedWalletCount+' wallets muted') : '— all wallets active';
+}
+
 function applyStats(m){
   if(!m) return;
   $('m-block').textContent=m.lastBlock||'–';
@@ -216,7 +273,10 @@ async function boot(){
   const ae=$('alerts'); if(alerts.length){ clearEmpty(ae); alerts.reverse().forEach(a=>ae.prepend(alertRow(a))); }
 
   await loadTables();
+  await loadMuted();
+  await loadPerformance();
   setInterval(loadTables, 8000);
+  setInterval(loadPerformance, 30000);
 
   const es=new EventSource('/events');
   let swaps=stats.totals.swaps, sw=stats.totals.swarms, al=stats.totals.alerts;

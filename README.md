@@ -28,10 +28,13 @@ cross-coin conviction wallets. Refresh/expand the list any time with
 | **Global alert floors** | *every* alert type is gated by `ALERT_MIN_MARKETCAP` (default $25k) and `PAIR_MIN_AGE_MINUTES` (default 30 min) — nothing below the cap floor or on a pair younger than the age floor ever fires |
 | **Real market cap** | market cap is fetched live from DexScreener at alert time (not just the cached/synthetic value), so every alert reports the true cap it was bought/sold into |
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |
+| **Repeat / escalation counter** | every alert reports how many times the *same token* has alerted inside a rolling window (`REPEAT_WINDOW_MINUTES`, default 35) — "🔁 REPEAT x3 · 3rd alert in 35m" — plus the **% price move since the previous alert** and how many **distinct** tracked wallets have driven it. It's **wallet-aware**: a brand-new top holder joining always breaks through the cooldown and is highlighted harder ("🚨 NEW HOLDER IN"), while the *same* busy wallet re-buying the same coin is suppressed so it can't hog the feed or masquerade as a swarm. Escalation conviction is keyed on distinct wallets (+4 each, capped +12) with an extra +4 when a new holder joins. Dashboard rows show a `🔁x{n}` / `🚨 NEW HOLDER` badge with the % move |
+| **Outcome tracking** | after every alert fires, the token's price is followed and the peak + 1h/6h/24h returns are recorded, so signal quality is measured from **real results** rather than guessed. The `/api/performance` view (and dashboard **Best Calls** card) ranks calls by peak gain and breaks win-rate down by the dimensions that catch runners — **multi-wallet vs solo** and **repeat vs single** — so you can see which setups actually pay and tune from data. Tunable via `PERFORMANCE_TRACKING`, `PERF_SAMPLE_MINUTES`, `PERF_TRACK_HOURS`, `PERF_WIN_THRESHOLD_PCT` |
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
 | **Noise filter** | settlement/quote tokens (WETH, USDC, USDG…) and tokenised equities (AAPL, TSLA, NVDA…) are dropped before detection via `IGNORE_SYMBOLS`, so the feed and alerts stay focused on real gems (no spurious "sold WETH" leg on every buy) |
 | **Conviction refinement** | after detection, conviction is re-scored with the *real* market cap, liquidity and momentum — low caps and healthy liquidity get a boost, dangerously thin liquidity a penalty — so the best low-cap gems rank highest |
+| **Mutable wallet groups** | turn a whole coin's tracked wallets off/on at runtime — click the coin in the dashboard's **Wallet Groups** card, or `POST`/`DELETE /api/muted/:symbol` (seed defaults with `MUTE_WALLET_TOKENS`). A wallet is only silenced when *every* coin it's a top-holder of is muted, so cross-conviction wallets that also hold other gems keep firing. Muted wallets drop out before detection — they never form or grow a swarm, solo, or entry |
 | **Wallet tiers** | each wallet is tiered by its best top-10 holder rank across the tracked coins — **alpha** (rank 1–3), **beta** (4–6), **chroma** (7–9), **delta** (10) — which anchors its confidence and feeds the conviction score; alert makeup reads e.g. "2 alpha · 1 beta" |
 | **Conviction score** | 0–100 from wallet quality (tier), count, capital, velocity, liquidity, market cap, historical accuracy, buy/sell ratio |
 | **Live prices & market cap** | real USD price / market cap / pair link from DexScreener (cached, background-refreshed, chain-filtered) when `DEXSCREENER_CHAIN` is set; deterministic synthetic fallback (marked `est`) otherwise |
@@ -130,6 +133,7 @@ alert rules are additionally editable at runtime through the API. Key vars:
 | `ALERT_WINDOW_SECONDS` | `300` | default detection window (5 min) |
 | `ALERT_MIN_USD` / `ALERT_MIN_CONVICTION` | `0` / `0` | default gates |
 | `ALERT_COOLDOWN_SECONDS` | `120` | per rule/token/kind cooldown |
+| `REPEAT_WINDOW_MINUTES` | `35` | rolling window for the repeat/escalation counter |
 | `IGNORE_DUST_USD` | `25` | drop swaps below this notional |
 | `IGNORE_STABLECOINS` | `true` | ignore tokens flagged stable |
 | `DISCORD_WEBHOOK_URL` | — | Discord alerts |
@@ -149,7 +153,11 @@ Invalid configuration fails fast at startup with a readable message.
 | GET | `/api/config` | effective non-secret config |
 | GET | `/api/tokens` | tracked tokens + per-token stats |
 | GET/POST/DELETE | `/api/wallets[/:address]` | manage tracked wallets |
+| GET | `/api/muted` | current muted wallet groups + affected wallet count |
+| POST/DELETE | `/api/muted/:symbol` | mute / unmute a coin's wallets at runtime (e.g. `HMM`) |
 | GET | `/api/swaps` `/api/swarms` `/api/alerts` | recent activity (`?limit=`) |
+| POST | `/api/test-alert` | send a sample alert to every configured channel (verify a new channel instantly) |
+| GET | `/api/performance` | tracked alert outcomes (peak/current return) + win-rate by signal type |
 | GET | `/api/leaderboard/wallets` `/api/leaderboard/tokens` | rankings |
 | GET/POST/PUT/DELETE | `/api/rules[/:id]` | manage alert rules |
 | GET | `/events` | SSE stream: `swap`, `swarm`, `alert`, `metrics` |
