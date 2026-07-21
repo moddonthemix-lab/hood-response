@@ -186,6 +186,7 @@ export class Aggregator {
       walletCount: wallets.length,
       wallets,
       walletSummary: summarizeWallets(walletObjs, wallets.length),
+      alsoHold: crossHoldings(walletObjs, token.symbol),
       totalUsd,
       marketCap,
       newToken: token.discovered === true,
@@ -206,6 +207,16 @@ const TIER_ORDER = ['alpha', 'beta', 'chroma', 'delta'];
  * Build a privacy-preserving makeup string from wallet tiers, e.g.
  * "2 alpha · 1 beta · 1 delta" — no addresses are exposed.
  */
+/** Other tracked coins these wallets also hold (excluding the swarm token). */
+function crossHoldings(
+  wallets: { holdsTokens: string[] }[],
+  ownSymbol: string,
+): string[] {
+  const set = new Set<string>();
+  for (const w of wallets) for (const c of w.holdsTokens) if (c !== ownSymbol) set.add(c);
+  return [...set].sort();
+}
+
 function summarizeWallets(wallets: { tier?: string }[], total: number): string {
   if (wallets.length === 0) return `${total} tracked`;
   const counts = new Map<string, number>();

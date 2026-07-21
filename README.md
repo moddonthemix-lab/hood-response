@@ -32,7 +32,8 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **Live prices & market cap** | real USD price / market cap / pair link from DexScreener (cached, background-refreshed, chain-filtered) when `DEXSCREENER_CHAIN` is set; deterministic synthetic fallback (marked `est`) otherwise |
 | **Market cap context** | every swarm/alert reports the token market cap it was bought/sold into |
 | **Address privacy** | wallet addresses are never surfaced in alerts, the dashboard, or the API feeds/SSE — only wallet counts and a category makeup (e.g. "3 smart-money · 1 whale") are shown |
-| **DexScreener links** | every alert (Telegram/Discord) and dashboard token links straight to its DexScreener chart; set `DEXSCREENER_CHAIN` for direct token pages, otherwise universal address search |
+| **Scanner-style cards** | Telegram alerts render as a rich HTML card (bold title, conviction bar, price/MC/liq/vol/age, 24h & 1h change, buy/sell counts, tier makeup, cross-holding overlap) with clickable **Chart** (DexScreener) + **Explorer** (Blockscout) links |
+| **DexScreener links** | every alert and dashboard token links straight to its DexScreener chart; set `DEXSCREENER_CHAIN` for direct token pages, otherwise universal address search |
 | **Configurable rules** | min wallets, time window, min USD, min conviction, cooldown, kinds, ignored tokens/wallets, ignore dust, ignore stablecoins, ignore duplicate wallets |
 | **Notifications** | Discord webhook, Telegram bot, generic REST webhook (each optional) |
 | **Live dashboard** | self-contained page at `/` — live feed, swarms, alerts, leaderboards, tracked wallets, latency/health, updated over SSE |

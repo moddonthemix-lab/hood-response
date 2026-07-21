@@ -42,6 +42,9 @@ async function main(): Promise<void> {
       swarm.marketCap = price.marketCap(token);
       swarm.priceLive = price.isLive(swarm.token);
       swarm.dexUrl = price.dexUrl(swarm.token);
+      swarm.priceUsd = price.priceOf(swarm.token);
+      swarm.liquidityUsd = price.liquidityOf(swarm.token);
+      swarm.dex = price.dexIdOf(swarm.token);
     }
     // Volume/momentum confirmation: attach + boost conviction when confirmed.
     const momentum = price.momentumOf(swarm.token);

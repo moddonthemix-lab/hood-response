@@ -1,7 +1,8 @@
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { NotificationDelivery, Swarm } from '../types.js';
-import { KIND_EMOJI, headline, textBody, usd } from './format.js';
+import { headline, telegramHtml, textBody, usd } from './format.js';
+import { explorerUrl } from '../links.js';
 
 const TIMEOUT_MS = 4000;
 
@@ -55,7 +56,7 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
           ]
         : []),
       ...(s.newToken ? [{ name: '🆕 Contract', value: s.token }] : []),
-      { name: 'Chart', value: `[DexScreener](${s.dexUrl})`, inline: true },
+      { name: 'Links', value: `[📊 Chart](${s.dexUrl}) · [🔎 Explorer](${explorerUrl(s.token)})`, inline: true },
     ],
     footer: { text: 'Swarm the Fly · Robinhood Chain' },
     timestamp: new Date(s.lastSeen).toISOString(),
@@ -76,7 +77,8 @@ async function sendTelegram(
   try {
     const res = await postJson(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: chatId,
-      text: `${KIND_EMOJI[s.kind]} ${textBody(s)}`,
+      text: telegramHtml(s),
+      parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
     return delivery('telegram', res.ok, res.ok ? undefined : `HTTP ${res.status}`);

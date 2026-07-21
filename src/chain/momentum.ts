@@ -10,7 +10,8 @@ import type { MomentumReport } from '../types.js';
  */
 export interface MomentumInput {
   volumeUsd: number | null;
-  priceChangePct: number | null;
+  priceChange1h: number | null;
+  priceChange24h: number | null;
   buys: number | null;
   sells: number | null;
 }
@@ -18,7 +19,8 @@ export interface MomentumInput {
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
 
 export function computeMomentum(input: MomentumInput): MomentumReport {
-  const { volumeUsd, priceChangePct, buys, sells } = input;
+  const { volumeUsd, priceChange1h, priceChange24h, buys, sells } = input;
+  const priceChangePct = priceChange1h ?? priceChange24h;
 
   const totalTx = (buys ?? 0) + (sells ?? 0);
   const buyPressurePct = totalTx > 0 ? ((buys ?? 0) / totalTx) * 100 : null;
@@ -42,6 +44,10 @@ export function computeMomentum(input: MomentumInput): MomentumReport {
   return {
     volumeUsd,
     priceChangePct,
+    priceChange1h,
+    priceChange24h,
+    buys,
+    sells,
     buyPressurePct: buyPressurePct != null ? Math.round(buyPressurePct) : null,
     confirmed,
     boost: Math.round(boost),
