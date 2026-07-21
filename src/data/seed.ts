@@ -1,4 +1,4 @@
-import type { TrackedToken, TrackedWallet, WalletCategory } from '../types.js';
+import type { TrackedToken, TrackedWallet, WalletCategory, WalletTier } from '../types.js';
 
 /**
  * Source of truth: "Robinhood Smart-Money Conviction List" (generated
@@ -139,6 +139,22 @@ function categorize(maxPct: number, coinCount: number): WalletCategory {
   return 'retail';
 }
 
+/** Tier from best holder rank: alpha 1–3, beta 4–6, chroma 7–9, delta 10. */
+function tierForRank(rank: number): WalletTier {
+  if (rank <= 3) return 'alpha';
+  if (rank <= 6) return 'beta';
+  if (rank <= 9) return 'chroma';
+  return 'delta';
+}
+
+/** Baseline confidence per tier (best rank = strongest conviction). */
+const TIER_CONFIDENCE: Record<WalletTier, number> = {
+  alpha: 0.9,
+  beta: 0.72,
+  chroma: 0.58,
+  delta: 0.45,
+};
+
 /** Build the immutable seed catalogs once at module load. */
 function build(): { tokens: TrackedToken[]; wallets: TrackedWallet[] } {
   const tokens: TrackedToken[] = RAW_TOKENS.map((t) => ({
@@ -153,39 +169,45 @@ function build(): { tokens: TrackedToken[]; wallets: TrackedWallet[] } {
     address: string;
     holdsTokens: Set<string>;
     maxPct: number;
+    bestRank: number;
   }
   const byWallet = new Map<string, Acc>();
 
   for (const [symbol, holders] of Object.entries(RAW_HOLDERS)) {
-    for (const h of holders) {
+    holders.forEach((h, i) => {
+      const rank = i + 1; // RAW_HOLDERS is ordered by holder rank (1..10)
       const key = h.address.toLowerCase();
       const acc = byWallet.get(key) ?? {
         address: key,
         holdsTokens: new Set<string>(),
         maxPct: 0,
+        bestRank: 99,
       };
       acc.holdsTokens.add(symbol);
       acc.maxPct = Math.max(acc.maxPct, h.pct);
+      acc.bestRank = Math.min(acc.bestRank, rank);
       byWallet.set(key, acc);
-    }
+    });
   }
 
   const wallets: TrackedWallet[] = [...byWallet.values()].map((acc) => {
     const coins = [...acc.holdsTokens].sort();
     const coinCount = coins.length;
     const category = categorize(acc.maxPct, coinCount);
-    // Confidence: base + reward for cross-coin conviction + holding size.
-    const confidence = clamp01(
-      0.45 + (coinCount - 1) * 0.12 + Math.min(acc.maxPct / 50, 0.25),
-    );
+    const tier = tierForRank(acc.bestRank);
+    // Confidence is anchored on the tier (best rank) and nudged up for
+    // cross-coin conviction wallets.
+    const confidence = clamp01(TIER_CONFIDENCE[tier] + (coinCount - 1) * 0.03);
     const label =
       coinCount > 1
-        ? `Smart money · ${coinCount} coins`
-        : `Top holder · ${coins[0]}`;
+        ? `${tier} · ${coinCount} coins`
+        : `${tier} · #${acc.bestRank} ${coins[0]}`;
     return {
       address: acc.address,
       label,
       category,
+      tier,
+      rank: acc.bestRank,
       confidence: Number(confidence.toFixed(3)),
       holdsTokens: coins,
       notes:
@@ -195,9 +217,13 @@ function build(): { tokens: TrackedToken[]; wallets: TrackedWallet[] } {
     };
   });
 
-  // Highest conviction first for stable ordering in the API/dashboard.
+  // Best tier first (alpha → delta), then cross-coin breadth, for stable order.
+  const tierOrder: Record<WalletTier, number> = { alpha: 0, beta: 1, chroma: 2, delta: 3 };
   wallets.sort(
-    (a, b) => b.holdsTokens.length - a.holdsTokens.length || b.confidence - a.confidence,
+    (a, b) =>
+      tierOrder[a.tier] - tierOrder[b.tier] ||
+      a.rank - b.rank ||
+      b.holdsTokens.length - a.holdsTokens.length,
   );
 
   return { tokens, wallets };

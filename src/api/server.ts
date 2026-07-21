@@ -42,6 +42,8 @@ const walletBody = z.object({
   address: z.string().regex(ADDR),
   label: z.string().min(1).max(120).default('Manual wallet'),
   category: z.enum(CATEGORIES as [WalletCategory, ...WalletCategory[]]).default('unknown'),
+  tier: z.enum(['alpha', 'beta', 'chroma', 'delta']).default('delta'),
+  rank: z.number().int().min(1).max(999).default(10),
   confidence: z.number().min(0).max(1).default(0.5),
   notes: z.string().max(500).optional(),
   holdsTokens: z.array(z.string()).default([]),
@@ -113,9 +115,10 @@ export async function buildServer(
 
   // ── Wallets ──────────────────────────────────────────────────────────────────
   app.get('/api/wallets', async (req) => {
-    const q = (req.query as { category?: string }).category;
+    const { category, tier } = req.query as { category?: string; tier?: string };
     let wallets = [...store.wallets.values()];
-    if (q) wallets = wallets.filter((w) => w.category === q);
+    if (category) wallets = wallets.filter((w) => w.category === category);
+    if (tier) wallets = wallets.filter((w) => w.tier === tier);
     // Omit the raw address from the public list; keep label/category/stats.
     return wallets.map(({ address, ...w }) => ({
       ...w,

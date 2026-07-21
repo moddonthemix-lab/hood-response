@@ -27,11 +27,22 @@ export type WalletCategory =
   | 'internal'
   | 'unknown';
 
+/**
+ * Conviction tier derived from a wallet's best holder rank across the tracked
+ * coins (it is a top-10 holder of one or more): alpha = rank 1–3, beta = 4–6,
+ * chroma = 7–9, delta = 10.
+ */
+export type WalletTier = 'alpha' | 'beta' | 'chroma' | 'delta';
+
 export interface TrackedWallet {
   /** Address (lowercased). */
   address: string;
   label: string;
   category: WalletCategory;
+  /** Conviction tier from best holder rank (alpha/beta/chroma/delta). */
+  tier: WalletTier;
+  /** Best (lowest) holder rank this wallet reaches across the tracked coins. */
+  rank: number;
   notes?: string;
   /** Operator confidence in this wallet, 0..1. Feeds the conviction score. */
   confidence: number;
