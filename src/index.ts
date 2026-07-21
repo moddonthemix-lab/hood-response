@@ -99,6 +99,30 @@ async function main(): Promise<void> {
       );
       return;
     }
+    // Global market-cap floor — no alerts on tokens below this cap.
+    if (
+      config.ALERT_MIN_MARKETCAP > 0 &&
+      swarm.marketCap > 0 &&
+      swarm.marketCap < config.ALERT_MIN_MARKETCAP
+    ) {
+      logger.info(
+        { token: swarm.tokenSymbol, mc: Math.round(swarm.marketCap) },
+        'alert suppressed: below minimum market cap',
+      );
+      return;
+    }
+    // Global minimum pair age — no alerts on pairs younger than this.
+    if (
+      config.PAIR_MIN_AGE_MINUTES > 0 &&
+      swarm.pairAgeHours != null &&
+      swarm.pairAgeHours * 60 < config.PAIR_MIN_AGE_MINUTES
+    ) {
+      logger.info(
+        { token: swarm.tokenSymbol, ageMin: Math.round((swarm.pairAgeHours ?? 0) * 60) },
+        'alert suppressed: pair too new',
+      );
+      return;
+    }
     // Optional volume gate: drop dead tokens when a minimum is configured.
     if (
       config.MOMENTUM_MIN_VOLUME_USD > 0 &&
