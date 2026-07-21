@@ -152,6 +152,7 @@ Invalid configuration fails fast at startup with a readable message.
 | GET | `/api/tokens` | tracked tokens + per-token stats |
 | GET/POST/DELETE | `/api/wallets[/:address]` | manage tracked wallets |
 | GET | `/api/swaps` `/api/swarms` `/api/alerts` | recent activity (`?limit=`) |
+| POST | `/api/test-alert` | send a sample alert to every configured channel (verify a new channel instantly) |
 | GET | `/api/leaderboard/wallets` `/api/leaderboard/tokens` | rankings |
 | GET/POST/PUT/DELETE | `/api/rules[/:id]` | manage alert rules |
 | GET | `/events` | SSE stream: `swap`, `swarm`, `alert`, `metrics` |

@@ -6,7 +6,7 @@ import { logger } from '../logger.js';
 import type { MemoryStore } from '../store/memory.js';
 import type { AlertEngine } from '../engine/alertEngine.js';
 import type { Aggregator } from '../engine/aggregator.js';
-import { configuredChannels } from '../notify/index.js';
+import { configuredChannels, dispatch } from '../notify/index.js';
 import type { Alert, AlertRule, Swarm, SwapEvent, WalletCategory } from '../types.js';
 import { DASHBOARD_HTML } from './dashboard.js';
 
@@ -168,6 +168,51 @@ export async function buildServer(
   app.get('/api/alerts', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
     return store.recentAlerts(limit).map(redactAlert);
+  });
+
+  // Send a sample alert to every configured channel so a new Telegram channel /
+  // Discord webhook can be verified instantly instead of waiting for a real gem.
+  app.post('/api/test-alert', async (_req, reply) => {
+    const now = Date.now();
+    const sample: Swarm = {
+      id: cryptoId(),
+      kind: 'BUY',
+      token: '0x000000000000000000000000000000000000dead',
+      tokenSymbol: 'TESTGEM',
+      walletCount: 3,
+      wallets: [],
+      walletSummary: '2 alpha · 1 beta',
+      totalUsd: 4200,
+      marketCap: 68_000,
+      newToken: false,
+      dexUrl: 'https://dexscreener.com/robinhood',
+      priceLive: true,
+      priceUsd: 0.0042,
+      liquidityUsd: 31_000,
+      dex: 'uniswap',
+      pairAgeHours: 3.2,
+      freshPair: false,
+      conviction: 74,
+      convictionBreakdown: {
+        walletQuality: 0,
+        walletCount: 0,
+        totalCapital: 0,
+        velocity: 0,
+        liquidity: 0,
+        marketCap: 0,
+        historicalAccuracy: 0,
+        buySellRatio: 0,
+      },
+      windowSeconds: 42,
+      firstSeen: now,
+      lastSeen: now,
+    };
+    const channels = configuredChannels();
+    if (channels.length === 0) {
+      return reply.code(400).send({ error: 'no notification channels configured' });
+    }
+    const deliveries = await dispatch(sample);
+    return { sent: true, channels, deliveries };
   });
 
   // ── Leaderboards ──────────────────────────────────────────────────────────────

@@ -81,7 +81,15 @@ async function sendTelegram(
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
-    return delivery('telegram', res.ok, res.ok ? undefined : `HTTP ${res.status}`);
+    if (res.ok) return delivery('telegram', true);
+    // Surface Telegram's own reason (e.g. "chat not found", "not enough rights
+    // to send text messages") — the common failures when posting to a channel
+    // the bot hasn't been made an admin of yet.
+    const reason = await res
+      .json()
+      .then((b) => (b as { description?: string }).description ?? `HTTP ${res.status}`)
+      .catch(() => `HTTP ${res.status}`);
+    return delivery('telegram', false, reason);
   } catch (err) {
     return delivery('telegram', false, (err as Error).message);
   }
