@@ -13,3 +13,9 @@ export function dexScreenerUrl(tokenAddress: string): string {
     ? `${DEXSCREENER_BASE}/${config.DEXSCREENER_CHAIN}/${addr}`
     : `${DEXSCREENER_BASE}/search?q=${addr}`;
 }
+
+/** Block-explorer token page link. */
+export function explorerUrl(tokenAddress: string): string {
+  const base = config.EXPLORER_BASE.replace(/\/$/, '');
+  return `${base}/token/${tokenAddress.toLowerCase()}`;
+}

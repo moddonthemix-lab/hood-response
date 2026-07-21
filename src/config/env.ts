@@ -111,6 +111,8 @@ const schema = z.object({
   DEXSCREENER_CHAIN: z.string().default('robinhood'),
   // How often (ms) to refresh live prices from DexScreener.
   PRICE_REFRESH_MS: num(15000),
+  // Block explorer base for Explorer links in alerts (Robinhood Chain Blockscout).
+  EXPLORER_BASE: z.string().default('https://robinhoodchain.blockscout.com'),
 });
 
 const parsed = schema.safeParse(process.env);

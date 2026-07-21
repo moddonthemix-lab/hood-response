@@ -101,6 +101,13 @@ export interface MomentumReport {
   volumeUsd: number | null;
   /** Recent price change % (1h if available, else 24h), or null. */
   priceChangePct: number | null;
+  /** 1h price change %, or null. */
+  priceChange1h: number | null;
+  /** 24h price change %, or null. */
+  priceChange24h: number | null;
+  /** 24h buy / sell transaction counts, or null. */
+  buys: number | null;
+  sells: number | null;
   /** Share of buys vs sells over 24h, 0–100, or null. */
   buyPressurePct: number | null;
   /** True when volume + direction confirm live upward momentum. */
@@ -143,6 +150,14 @@ export interface Swarm {
   pairAgeHours?: number | null;
   /** True when the pair is newer than the fresh-pair threshold. */
   freshPair?: boolean;
+  /** Live token price (USD) at alert time, for display. */
+  priceUsd?: number | null;
+  /** Live DEX liquidity (USD) at alert time, for display. */
+  liquidityUsd?: number | null;
+  /** DEX id (e.g. "uniswap"). */
+  dex?: string | null;
+  /** Other tracked coins the swarm's wallets also hold (cross-conviction). */
+  alsoHold?: string[];
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

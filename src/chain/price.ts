@@ -11,9 +11,11 @@ interface LivePrice {
   liquidityUsd: number | null;
   pairCreatedAt: number | null;
   volume24: number | null;
-  priceChangePct: number | null;
+  priceChangeH1: number | null;
+  priceChangeH24: number | null;
   buys24: number | null;
   sells24: number | null;
+  dexId: string | null;
   pairAddress: string;
   chainId: string;
   fetchedAt: number;
@@ -21,6 +23,7 @@ interface LivePrice {
 
 interface DexPair {
   chainId?: string;
+  dexId?: string;
   pairAddress?: string;
   baseToken?: { address?: string; symbol?: string };
   priceUsd?: string;
@@ -134,10 +137,16 @@ export class PriceOracle {
     if (!l) return null;
     return computeMomentum({
       volumeUsd: l.volume24,
-      priceChangePct: l.priceChangePct,
+      priceChange1h: l.priceChangeH1,
+      priceChange24h: l.priceChangeH24,
       buys: l.buys24,
       sells: l.sells24,
     });
+  }
+
+  /** DEX id (e.g. "uniswap") for the token's best pair, or null. */
+  dexIdOf(tokenAddress: string): string | null {
+    return this.fresh(tokenAddress)?.dexId ?? null;
   }
 
   /**
@@ -216,9 +225,11 @@ export class PriceOracle {
         liquidityUsd: best.liquidity?.usd ?? null,
         pairCreatedAt: best.pairCreatedAt ?? null,
         volume24: best.volume?.h24 ?? null,
-        priceChangePct: best.priceChange?.h1 ?? best.priceChange?.h24 ?? null,
+        priceChangeH1: best.priceChange?.h1 ?? null,
+        priceChangeH24: best.priceChange?.h24 ?? null,
         buys24: best.txns?.h24?.buys ?? null,
         sells24: best.txns?.h24?.sells ?? null,
+        dexId: best.dexId ?? null,
         pairAddress: best.pairAddress ?? '',
         chainId: best.chainId ?? config.DEXSCREENER_CHAIN,
         fetchedAt: Date.now(),
