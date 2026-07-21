@@ -8,6 +8,7 @@ import { AlertEngine } from './engine/alertEngine.js';
 import { attachPersistence } from './store/persistence.js';
 import { buildServer } from './api/server.js';
 import { configuredChannels } from './notify/index.js';
+import { SafetyChecker } from './chain/safety.js';
 import type { Swarm, SwapEvent } from './types.js';
 
 async function main(): Promise<void> {
@@ -32,6 +33,8 @@ async function main(): Promise<void> {
   // Refresh a swarm's market cap from the live source before it is recorded or
   // alerted, so the market cap shown is the real one (not the synthetic
   // placeholder) even for tokens the background refresher hasn't reached yet.
+  const safety = new SafetyChecker();
+
   const enrichSwarm = async (swarm: Swarm): Promise<void> => {
     await price.refreshNow(swarm.token);
     const token = store.tokensByAddress.get(swarm.token);
@@ -40,6 +43,24 @@ async function main(): Promise<void> {
       swarm.priceLive = price.isLive(swarm.token);
       swarm.dexUrl = price.dexUrl(swarm.token);
     }
+  };
+
+  // Record the swarm, then alert only if it passes the safety screen (honeypot /
+  // tax / liquidity). Unsafe swarms still appear on the dashboard, tagged, but
+  // never reach the notification channels.
+  const recordAndMaybeAlert = async (swarm: Swarm): Promise<void> => {
+    if (config.SAFETY_FILTER) {
+      swarm.safety = await safety.check(swarm.token, price.liquidityOf(swarm.token));
+    }
+    store.recordSwarm(swarm);
+    if (swarm.safety && !swarm.safety.ok) {
+      logger.info(
+        { token: swarm.tokenSymbol, fails: swarm.safety.hardFails },
+        'alert suppressed by safety filter',
+      );
+      return;
+    }
+    await engine.evaluate(swarm);
   };
 
   // Pipeline: chain → decoder → store → aggregator → alert engine → notify.
@@ -59,8 +80,7 @@ async function main(): Promise<void> {
     // Multi-wallet swarms (BUY / SELL / ROTATION).
     for (const swarm of aggregator.ingest(swap)) {
       await enrichSwarm(swarm);
-      store.recordSwarm(swarm);
-      await engine.evaluate(swarm);
+      await recordAndMaybeAlert(swarm);
     }
 
     // Solo low-cap buy: record + alert only when the real market cap is low.
@@ -68,8 +88,7 @@ async function main(): Promise<void> {
     if (solo) {
       await enrichSwarm(solo);
       if (solo.marketCap > 0 && solo.marketCap < config.SOLO_MAX_MARKETCAP) {
-        store.recordSwarm(solo);
-        await engine.evaluate(solo);
+        await recordAndMaybeAlert(solo);
       }
     }
   };

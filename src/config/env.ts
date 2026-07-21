@@ -75,6 +75,12 @@ const schema = z.object({
   // when its market cap is below SOLO_MAX_MARKETCAP (early low-cap gems).
   SOLO_ALERTS: bool(true),
   SOLO_MAX_MARKETCAP: num(100_000),
+  // Safety filter: run each token through GoPlus token-security + a minimum
+  // liquidity check before alerting, so rugs/honeypots/high-tax tokens are
+  // suppressed. Set false to alert on everything.
+  SAFETY_FILTER: bool(true),
+  SAFETY_MIN_LIQUIDITY_USD: num(5_000),
+  SAFETY_MAX_TAX_PCT: num(15),
   ALERT_COOLDOWN_SECONDS: num(120),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),

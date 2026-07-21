@@ -67,6 +67,23 @@ export interface ConvictionBreakdown {
   buySellRatio: number;
 }
 
+/** Result of the pre-alert token safety screen (GoPlus + liquidity). */
+export interface SafetyReport {
+  /** True when there are no hard failures — safe enough to alert. */
+  ok: boolean;
+  checkedAt: number;
+  liquidityUsd: number | null;
+  buyTaxPct: number | null;
+  sellTaxPct: number | null;
+  honeypot: boolean;
+  /** Blocking problems (honeypot, can't sell, high tax, no liquidity, …). */
+  hardFails: string[];
+  /** Non-blocking concerns (mintable, unlocked LP, unverified, …). */
+  warnings: string[];
+  /** Where the verdict came from. */
+  source: 'goplus' | 'liquidity-only' | 'none';
+}
+
 export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION' | 'SOLO';
 
 export interface Swarm {
@@ -93,6 +110,8 @@ export interface Swarm {
   dexUrl: string;
   /** True when price/market cap came from a live DexScreener pair (vs synthetic). */
   priceLive: boolean;
+  /** Token safety screen result, when the safety filter is enabled. */
+  safety?: SafetyReport;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;
