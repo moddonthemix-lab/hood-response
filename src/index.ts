@@ -51,6 +51,15 @@ async function main(): Promise<void> {
         swarm.conviction = Math.min(100, swarm.conviction + momentum.boost);
       }
     }
+    // Pair age / freshness.
+    const createdAt = price.pairCreatedAt(swarm.token);
+    if (createdAt) {
+      swarm.pairAgeHours = Math.round(((Date.now() - createdAt) / 3_600_000) * 10) / 10;
+      swarm.freshPair = swarm.pairAgeHours <= config.FRESH_PAIR_MAX_AGE_HOURS;
+    } else {
+      swarm.pairAgeHours = null;
+      swarm.freshPair = false;
+    }
   };
 
   // Record the swarm, then alert only if it passes the safety screen (honeypot /
@@ -109,6 +118,16 @@ async function main(): Promise<void> {
       await enrichSwarm(solo);
       if (solo.marketCap > 0 && solo.marketCap < config.SOLO_MAX_MARKETCAP) {
         await recordAndMaybeAlert(solo);
+      }
+    }
+
+    // Fresh-pair first entry: a qualifying-tier wallet's first buy of a token
+    // whose pair is only hours old — record + alert only when the pair is fresh.
+    const entry = aggregator.firstEntryCandidate(swap);
+    if (entry) {
+      await enrichSwarm(entry);
+      if (entry.freshPair) {
+        await recordAndMaybeAlert(entry);
       }
     }
   };

@@ -26,6 +26,8 @@ const SOLO_THROTTLE_MS = 60_000;
 export class Aggregator {
   private readonly windows = new Map<string, WindowState>();
   private readonly lastSolo = new Map<string, number>();
+  /** (wallet:token) pairs we've already seen a buy for — powers first-entry. */
+  private readonly seenBuys = new Set<string>();
 
   /** Detection floor = smallest wallet threshold across all enabled rules. */
   detectionFloor = config.ALERT_MIN_WALLETS;
@@ -99,6 +101,24 @@ export class Aggregator {
     if (swap.timestamp - last < SOLO_THROTTLE_MS) return null;
     this.lastSolo.set(swap.token, swap.timestamp);
     return this.buildSwarm('SOLO', swap.token, [swap]);
+  }
+
+  /**
+   * Build an ENTRY candidate when a qualifying-tier wallet makes its first-ever
+   * (since start) buy of a token. Pair-freshness is confirmed later in the
+   * pipeline, which has the live pair age. Marks the (wallet,token) as seen for
+   * ALL buys so we never re-fire, regardless of tier.
+   */
+  firstEntryCandidate(swap: SwapEvent): Swarm | null {
+    if (!config.FRESH_ENTRY_ALERTS || swap.direction !== 'BUY') return null;
+    if (!this.eligible(swap)) return null;
+    const key = `${swap.wallet}:${swap.token}`;
+    const first = !this.seenBuys.has(key);
+    this.seenBuys.add(key);
+    if (!first) return null;
+    const tier = this.store.wallets.get(swap.wallet)?.tier ?? 'delta';
+    if (!config.freshEntryTiers.includes(tier)) return null;
+    return this.buildSwarm('ENTRY', swap.token, [swap]);
   }
 
   private detectDirect(key: string, state: WindowState, swap: SwapEvent): Swarm | null {

@@ -114,6 +114,25 @@ describe('Aggregator', () => {
     expect(agg.soloCandidate(swap(wallets[2]!, token, 'SELL', now))).toBeNull();
   });
 
+  it('emits a first-entry candidate only for a qualifying-tier wallet, once', () => {
+    const { store, agg, token } = ctx;
+    const now = Date.now();
+    const alpha = [...store.wallets.values()].find((w) => w.tier === 'alpha')!.address;
+    const delta = [...store.wallets.values()].find((w) => w.tier === 'delta')!.address;
+
+    const first = agg.firstEntryCandidate(swap(alpha, token, 'BUY', now));
+    expect(first).not.toBeNull();
+    expect(first!.kind).toBe('ENTRY');
+    expect(first!.walletCount).toBe(1);
+
+    // Same wallet+token again → not a first entry.
+    expect(agg.firstEntryCandidate(swap(alpha, token, 'BUY', now + 1000))).toBeNull();
+
+    // A delta wallet is below the default fresh-entry tier gate (alpha,beta).
+    const otherToken = store.tokensBySymbol.get('TENDIES')!.address;
+    expect(agg.firstEntryCandidate(swap(delta, otherToken, 'BUY', now))).toBeNull();
+  });
+
   it('detects rotation when sellers of one token buy another', () => {
     const { store, agg, wallets } = ctx;
     const tokenA = store.tokensBySymbol.get('CASHCAT')!.address;

@@ -109,7 +109,7 @@ export interface MomentumReport {
   boost: number;
 }
 
-export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION' | 'SOLO';
+export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION' | 'SOLO' | 'ENTRY';
 
 export interface Swarm {
   id: string;
@@ -139,6 +139,10 @@ export interface Swarm {
   safety?: SafetyReport;
   /** Volume / momentum confirmation for the token. */
   momentum?: MomentumReport;
+  /** Age of the DEX pair in hours at alert time, or null if unknown. */
+  pairAgeHours?: number | null;
+  /** True when the pair is newer than the fresh-pair threshold. */
+  freshPair?: boolean;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;
