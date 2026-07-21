@@ -28,6 +28,7 @@ cross-coin conviction wallets. Refresh/expand the list any time with
 | **Global alert floors** | *every* alert type is gated by `ALERT_MIN_MARKETCAP` (default $25k) and `PAIR_MIN_AGE_MINUTES` (default 30 min) — nothing below the cap floor or on a pair younger than the age floor ever fires |
 | **Real market cap** | market cap is fetched live from DexScreener at alert time (not just the cached/synthetic value), so every alert reports the true cap it was bought/sold into |
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |
+| **Repeat / escalation counter** | every alert reports how many times the *same token* has alerted inside a rolling window (`REPEAT_WINDOW_MINUTES`, default 35) — "🔁 REPEAT x3 · 3rd alert in 35m" — so sustained tracked-wallet interest that the per-token cooldown otherwise hides is obvious. Each repeat past the first also nudges conviction up (+4 each, capped +12). Dashboard swarm/alert rows show a `🔁x{n}` badge |
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
 | **Noise filter** | settlement/quote tokens (WETH, USDC, USDG…) and tokenised equities (AAPL, TSLA, NVDA…) are dropped before detection via `IGNORE_SYMBOLS`, so the feed and alerts stay focused on real gems (no spurious "sold WETH" leg on every buy) |
@@ -130,6 +131,7 @@ alert rules are additionally editable at runtime through the API. Key vars:
 | `ALERT_WINDOW_SECONDS` | `300` | default detection window (5 min) |
 | `ALERT_MIN_USD` / `ALERT_MIN_CONVICTION` | `0` / `0` | default gates |
 | `ALERT_COOLDOWN_SECONDS` | `120` | per rule/token/kind cooldown |
+| `REPEAT_WINDOW_MINUTES` | `35` | rolling window for the repeat/escalation counter |
 | `IGNORE_DUST_USD` | `25` | drop swaps below this notional |
 | `IGNORE_STABLECOINS` | `true` | ignore tokens flagged stable |
 | `DISCORD_WEBHOOK_URL` | — | Discord alerts |

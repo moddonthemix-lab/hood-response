@@ -158,6 +158,12 @@ export interface Swarm {
   dex?: string | null;
   /** Other tracked coins the swarm's wallets also hold (cross-conviction). */
   alsoHold?: string[];
+  /** How many alerts this token has produced within the repeat window (this
+   *  alert included). 1 = first alert in the window; 2 = second ("x2"); etc.
+   *  Surfaces repeated/escalating interest that the per-token cooldown hides. */
+  repeatCount?: number;
+  /** The rolling repeat window in minutes (for display, e.g. "2nd in 35m"). */
+  repeatWindowMinutes?: number;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

@@ -69,6 +69,9 @@ const SINGLE_WALLET_KINDS = new Set(['SOLO', 'ENTRY']);
 export class AlertEngine {
   /** cooldown key -> last fire timestamp (ms). */
   private readonly cooldowns = new Map<string, number>();
+  /** token -> timestamps (ms) of the alerts fired for it, pruned to the repeat
+   *  window. Length after recording is the token's alert count in the window. */
+  private readonly repeats = new Map<string, number[]>();
 
   constructor(
     private readonly store: MemoryStore,
@@ -136,13 +139,52 @@ export class AlertEngine {
     return true;
   }
 
+  /**
+   * Record that an alert fired for `token` at `now` and return how many alerts
+   * (this one included) it has produced inside the rolling repeat window. 1 is
+   * the first alert in the window, 2 the second, etc. — the escalation signal
+   * that survives the per-token/kind cooldown hiding individual re-fires.
+   */
+  private recordRepeat(token: string, now: number): number {
+    const windowMs = config.REPEAT_WINDOW_MINUTES * 60_000;
+    const fresh = (this.repeats.get(token) ?? []).filter((t) => now - t < windowMs);
+    fresh.push(now);
+    this.repeats.set(token, fresh);
+    // Bound memory on a long-running process with many discovered tokens.
+    if (this.repeats.size > 5_000) {
+      for (const [tok, ts] of this.repeats) {
+        if (ts.every((t) => now - t >= windowMs)) this.repeats.delete(tok);
+      }
+    }
+    return fresh.length;
+  }
+
+  /** Escalation conviction bonus for a repeated token: +4 per repeat past the
+   *  first, capped at +12 (so a 4th+ alert in the window tops out). */
+  private escalationBoost(repeatCount: number): number {
+    return Math.min(12, Math.max(0, repeatCount - 1) * 4);
+  }
+
   /** Evaluate a detected swarm against all rules and fire alerts as needed. */
   async evaluate(swarm: Swarm): Promise<Alert[]> {
     const now = Date.now();
     const fired: Alert[] = [];
+    let counted = false;
     for (const rule of this.store.rules.values()) {
       if (!this.matches(rule, swarm)) continue;
       if (!this.cooled(rule, swarm, now)) continue;
+
+      // First rule that actually fires for this swarm counts the repeat once and
+      // applies the escalation boost, so the alert reports "Nth in Xm" and its
+      // conviction reflects the token's sustained tracked-wallet interest.
+      if (!counted) {
+        counted = true;
+        swarm.repeatCount = this.recordRepeat(swarm.token, now);
+        swarm.repeatWindowMinutes = config.REPEAT_WINDOW_MINUTES;
+        if (swarm.repeatCount > 1) {
+          swarm.conviction = Math.min(100, swarm.conviction + this.escalationBoost(swarm.repeatCount));
+        }
+      }
 
       const alert: Alert = {
         id: randomUUID(),
@@ -154,7 +196,13 @@ export class AlertEngine {
       };
       this.store.recordAlert(alert);
       logger.info(
-        { rule: rule.name, kind: swarm.kind, token: swarm.tokenSymbol, conviction: swarm.conviction },
+        {
+          rule: rule.name,
+          kind: swarm.kind,
+          token: swarm.tokenSymbol,
+          conviction: swarm.conviction,
+          repeat: swarm.repeatCount,
+        },
         'ALERT fired',
       );
       // Deliver asynchronously; attach results when they land.

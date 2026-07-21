@@ -50,6 +50,23 @@ function convBar(score: number): string {
   return '🟩'.repeat(filled) + '⬜'.repeat(5 - filled);
 }
 
+/** 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th" … */
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+/** Prominent repeat/escalation badge, or null when this is the first alert on
+ *  the token inside the window (nothing to escalate). */
+function repeatBadge(s: Swarm): string | null {
+  const n = s.repeatCount ?? 0;
+  if (n < 2) return null;
+  const win = s.repeatWindowMinutes ?? 35;
+  const heat = n >= 4 ? '🔥🔥' : '🔥';
+  return `🔁 REPEAT x${n} ${heat} · ${ordinal(n)} alert in ${win}m`;
+}
+
 function typeTitle(s: Swarm): string {
   const nu = s.newToken ? '🆕 NEW COIN · ' : '';
   switch (s.kind) {
@@ -77,7 +94,9 @@ function cardLines(s: Swarm): string[] {
   const buys = s.momentum?.buys ?? null;
   const sells = s.momentum?.sells ?? null;
 
+  const repeat = repeatBadge(s);
   const lines: string[] = [
+    ...(repeat ? [repeat, ``] : []),
     `${marker} ${sym} [${compact(s.marketCap)}] $${sym}`,
     `⛓️ Robinhood · ${s.dex ?? 'dex'}`,
     `💰 $${fmtPrice(s.priceUsd)}`,

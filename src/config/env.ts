@@ -97,6 +97,12 @@ const schema = z.object({
   FRESH_PAIR_MAX_AGE_HOURS: num(48),
   FRESH_ENTRY_TIERS: z.string().default('alpha,beta'),
   ALERT_COOLDOWN_SECONDS: num(120),
+  // Repeat/escalation tracking: how many alerts a token has fired inside this
+  // rolling window is counted and surfaced ("2nd alert in 35m"), and each
+  // repeat past the first nudges conviction up. This is what tells you a token
+  // keeps drawing tracked-wallet interest even though the per-token cooldown
+  // hides the individual re-fires.
+  REPEAT_WINDOW_MINUTES: num(35),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"
