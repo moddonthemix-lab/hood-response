@@ -66,4 +66,11 @@ describe('evaluateSafety', () => {
     expect(r.source).toBe('none');
     expect(r.warnings).toContain('liquidity unknown');
   });
+
+  it('uses the Blockscout fallback when GoPlus is unavailable', () => {
+    const r = evaluateSafety(null, 50_000, T, { verified: false });
+    expect(r.source).toBe('blockscout');
+    expect(r.warnings).toContain('unverified contract');
+    expect(r.ok).toBe(true);
+  });
 });
