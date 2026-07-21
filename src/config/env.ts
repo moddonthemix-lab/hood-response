@@ -71,6 +71,10 @@ const schema = z.object({
   ALERT_WINDOW_SECONDS: num(300),
   ALERT_MIN_USD: num(0),
   ALERT_MIN_CONVICTION: num(0),
+  // Solo-buy alerts: fire when a SINGLE tracked wallet buys a coin, but only
+  // when its market cap is below SOLO_MAX_MARKETCAP (early low-cap gems).
+  SOLO_ALERTS: bool(true),
+  SOLO_MAX_MARKETCAP: num(100_000),
   ALERT_COOLDOWN_SECONDS: num(120),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),

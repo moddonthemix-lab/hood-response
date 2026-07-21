@@ -36,6 +36,7 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .tag.BUY { background:#0d2a17; color:var(--green); }
   .tag.SELL { background:#2b1113; color:var(--red); }
   .tag.ROTATION { background:#20132e; color:var(--violet); }
+  .tag.SOLO { background:#2e2405; color:#f0b429; }
   .tag.NEW { background:#3a2a05; color:#f0b429; }
   .addr { color:var(--muted); font-size:11px; }
   a.dex { color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent); }

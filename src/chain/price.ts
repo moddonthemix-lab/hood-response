@@ -107,6 +107,19 @@ export class PriceOracle {
     return this.fresh(tokenAddress) !== null;
   }
 
+  /**
+   * Fetch this token's price/market cap right now if we don't already have a
+   * fresh value. Used at alert time so the market cap in a notification is the
+   * real one, not the synthetic placeholder (important for just-discovered
+   * tokens the background refresher hasn't reached yet).
+   */
+  async refreshNow(tokenAddress: string): Promise<void> {
+    if (!this.liveEnabled) return;
+    const key = tokenAddress.toLowerCase();
+    if (this.fresh(key)) return;
+    await this.fetchOne(key);
+  }
+
   /** Best DexScreener link: the precise pair page when known, else token search. */
   dexUrl(tokenAddress: string): string {
     const live = this.fresh(tokenAddress);

@@ -8,6 +8,7 @@ import { AlertEngine } from './engine/alertEngine.js';
 import { attachPersistence } from './store/persistence.js';
 import { buildServer } from './api/server.js';
 import { configuredChannels } from './notify/index.js';
+import type { Swarm, SwapEvent } from './types.js';
 
 async function main(): Promise<void> {
   logger.info(
@@ -28,8 +29,21 @@ async function main(): Promise<void> {
 
   const detachPersistence = await attachPersistence(store);
 
+  // Refresh a swarm's market cap from the live source before it is recorded or
+  // alerted, so the market cap shown is the real one (not the synthetic
+  // placeholder) even for tokens the background refresher hasn't reached yet.
+  const enrichSwarm = async (swarm: Swarm): Promise<void> => {
+    await price.refreshNow(swarm.token);
+    const token = store.tokensByAddress.get(swarm.token);
+    if (token) {
+      swarm.marketCap = price.marketCap(token);
+      swarm.priceLive = price.isLive(swarm.token);
+      swarm.dexUrl = price.dexUrl(swarm.token);
+    }
+  };
+
   // Pipeline: chain → decoder → store → aggregator → alert engine → notify.
-  const listener = createListener(store, price, (swap) => {
+  const handleSwap = async (swap: SwapEvent): Promise<void> => {
     // Auto-register unknown tokens so brand-new coins flow through the pipeline.
     store.ensureToken(swap.token, swap.tokenSymbol);
     // Log only meaningful (non-dust) live buys/sells — these wallets can be very
@@ -41,11 +55,26 @@ async function main(): Promise<void> {
       );
     }
     store.recordSwap(swap);
+
+    // Multi-wallet swarms (BUY / SELL / ROTATION).
     for (const swarm of aggregator.ingest(swap)) {
+      await enrichSwarm(swarm);
       store.recordSwarm(swarm);
-      void engine.evaluate(swarm);
+      await engine.evaluate(swarm);
     }
-  });
+
+    // Solo low-cap buy: record + alert only when the real market cap is low.
+    const solo = aggregator.soloCandidate(swap);
+    if (solo) {
+      await enrichSwarm(solo);
+      if (solo.marketCap > 0 && solo.marketCap < config.SOLO_MAX_MARKETCAP) {
+        store.recordSwarm(solo);
+        await engine.evaluate(solo);
+      }
+    }
+  };
+
+  const listener = createListener(store, price, (swap) => void handleSwap(swap));
   listener.start();
 
   const app = await buildServer(store, engine, aggregator);

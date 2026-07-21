@@ -4,6 +4,7 @@ export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   BUY: '🟢🪰',
   SELL: '🔴🪰',
   ROTATION: '🔄🪰',
+  SOLO: '🕵️🪰',
 };
 
 export function usd(n: number): string {
@@ -14,10 +15,13 @@ export function usd(n: number): string {
 
 export function headline(s: Swarm): string {
   const e = KIND_EMOJI[s.kind];
+  const tag = s.newToken ? '🆕 NEW COIN · ' : '';
   if (s.kind === 'ROTATION') {
     return `${e} ROTATION — ${s.walletCount} wallets rotating ${s.tokenSymbol} → ${s.rotatedIntoSymbol}`;
   }
-  const tag = s.newToken ? '🆕 NEW COIN · ' : '';
+  if (s.kind === 'SOLO') {
+    return `${e} ${tag}SOLO BUY — a tracked wallet is aping ${s.tokenSymbol} (low cap)`;
+  }
   const verb = s.kind === 'BUY' ? 'accumulating' : 'dumping';
   return `${e} ${tag}SWARM — ${s.walletCount} wallets ${verb} ${s.tokenSymbol}`;
 }

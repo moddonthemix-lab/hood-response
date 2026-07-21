@@ -20,8 +20,12 @@ interface WindowState {
  * re-emits when the set grows — and it holds everything in memory so the hot
  * path stays sub-millisecond.
  */
+/** Minimum gap between solo-buy candidates for the same token (ms). */
+const SOLO_THROTTLE_MS = 60_000;
+
 export class Aggregator {
   private readonly windows = new Map<string, WindowState>();
+  private readonly lastSolo = new Map<string, number>();
 
   /** Detection floor = smallest wallet threshold across all enabled rules. */
   detectionFloor = config.ALERT_MIN_WALLETS;
@@ -81,6 +85,20 @@ export class Aggregator {
       if (rotation) swarms.push(rotation);
     }
     return swarms;
+  }
+
+  /**
+   * Build a single-wallet SOLO buy candidate (throttled per token). The market
+   * cap gate lives in the async pipeline, which fetches the real market cap
+   * before deciding whether this low-cap-only alert should fire.
+   */
+  soloCandidate(swap: SwapEvent): Swarm | null {
+    if (!config.SOLO_ALERTS || swap.direction !== 'BUY') return null;
+    if (!this.eligible(swap)) return null;
+    const last = this.lastSolo.get(swap.token) ?? 0;
+    if (swap.timestamp - last < SOLO_THROTTLE_MS) return null;
+    this.lastSolo.set(swap.token, swap.timestamp);
+    return this.buildSwarm('SOLO', swap.token, [swap]);
   }
 
   private detectDirect(key: string, state: WindowState, swap: SwapEvent): Swarm | null {
