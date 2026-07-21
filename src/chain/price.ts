@@ -7,6 +7,8 @@ import { dexScreenerUrl } from '../links.js';
 interface LivePrice {
   priceUsd: number;
   marketCap: number;
+  liquidityUsd: number | null;
+  pairCreatedAt: number | null;
   pairAddress: string;
   chainId: string;
   fetchedAt: number;
@@ -20,6 +22,7 @@ interface DexPair {
   marketCap?: number;
   fdv?: number;
   liquidity?: { usd?: number };
+  pairCreatedAt?: number;
 }
 
 const TTL_MS = 60_000;
@@ -107,6 +110,16 @@ export class PriceOracle {
     return this.fresh(tokenAddress) !== null;
   }
 
+  /** Live DEX liquidity (USD) for the token, or null if unknown. */
+  liquidityOf(tokenAddress: string): number | null {
+    return this.fresh(tokenAddress)?.liquidityUsd ?? null;
+  }
+
+  /** Pair creation time (unix ms) for the token, or null if unknown. */
+  pairCreatedAt(tokenAddress: string): number | null {
+    return this.fresh(tokenAddress)?.pairCreatedAt ?? null;
+  }
+
   /**
    * Fetch this token's price/market cap right now if we don't already have a
    * fresh value. Used at alert time so the market cap in a notification is the
@@ -180,6 +193,8 @@ export class PriceOracle {
       this.live.set(address, {
         priceUsd,
         marketCap: best.marketCap ?? best.fdv ?? 0,
+        liquidityUsd: best.liquidity?.usd ?? null,
+        pairCreatedAt: best.pairCreatedAt ?? null,
         pairAddress: best.pairAddress ?? '',
         chainId: best.chainId ?? config.DEXSCREENER_CHAIN,
         fetchedAt: Date.now(),

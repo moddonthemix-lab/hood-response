@@ -38,6 +38,8 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .tag.ROTATION { background:#20132e; color:var(--violet); }
   .tag.SOLO { background:#2e2405; color:#f0b429; }
   .tag.NEW { background:#3a2a05; color:#f0b429; }
+  .tag.UNSAFE { background:#2b1113; color:var(--red); }
+  .tag.WARN { background:#2e2405; color:#d29922; }
   .addr { color:var(--muted); font-size:11px; }
   a.dex { color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent); }
   a.dex:hover { color:#7dd3fc; }
@@ -133,11 +135,12 @@ function feedRow(s){
   return d;
 }
 const newBadge = (s) => s.newToken ? '<span class="tag NEW">NEW</span>' : '';
+const safeBadge = (s) => !s.safety ? '' : (!s.safety.ok ? '<span class="tag UNSAFE" title="'+(s.safety.hardFails||[]).join(', ')+'">RUG?</span>' : ((s.safety.warnings&&s.safety.warnings.length) ? '<span class="tag WARN" title="'+s.safety.warnings.join(', ')+'">⚠</span>' : '<span class="tag" style="color:var(--green)">✓</span>'));
 
 function swarmRow(s){
   const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+safeBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
@@ -147,7 +150,7 @@ function swarmRow(s){
 function alertRow(a){
   const s=a.swarm; const d=document.createElement('div'); d.className='row flash';
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+safeBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
@@ -156,7 +159,7 @@ function alertRow(a){
 }
 function newCoinRow(s){
   const d=document.createElement('div'); d.className='row flash';
-  d.innerHTML='<span class="tag NEW">NEW</span>'+
+  d.innerHTML='<span class="tag NEW">NEW</span>'+safeBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+'</span>'+
     '<span class="grow addr" title="'+s.token+'">'+dexA(s.dexUrl,s.token)+'</span>'+
     '<span class="mono">'+s.walletCount+'w · '+mcLabel(s)+'</span>'+

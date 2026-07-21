@@ -39,6 +39,14 @@ export function textBody(s: Swarm): string {
     `Window: ${s.windowSeconds}s`,
     `Wallets: ${s.walletSummary}`,
   ];
+  // Safety summary (alerts only fire when the token passed the screen).
+  if (s.safety) {
+    const liq = s.safety.liquidityUsd != null ? usd(s.safety.liquidityUsd) : '?';
+    const bt = s.safety.buyTaxPct != null ? Math.round(s.safety.buyTaxPct) : '?';
+    const st = s.safety.sellTaxPct != null ? Math.round(s.safety.sellTaxPct) : '?';
+    lines.push(`Liquidity: ${liq} · Tax ${bt}/${st}% · ✅ passed safety`);
+    if (s.safety.warnings.length) lines.push(`⚠️ ${s.safety.warnings.join(', ')}`);
+  }
   // For freshly discovered coins, surface the contract so it's actionable.
   if (s.newToken) lines.push(`Contract: ${s.token}`);
   lines.push(`Chart: ${s.dexUrl}`);
