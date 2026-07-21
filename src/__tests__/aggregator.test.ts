@@ -71,6 +71,17 @@ describe('Aggregator', () => {
     expect(agg.ingest(dust(wallets[2]!))).toHaveLength(0);
   });
 
+  it('ignores settlement/equity symbols (e.g. WETH) entirely', () => {
+    const { agg, wallets, token } = ctx;
+    const now = Date.now();
+    const weth = (w: string): SwapEvent => ({ ...swap(w, token, 'BUY', now), tokenSymbol: 'WETH' });
+    expect(agg.ingest(weth(wallets[0]!))).toHaveLength(0);
+    expect(agg.ingest(weth(wallets[1]!))).toHaveLength(0);
+    expect(agg.ingest(weth(wallets[2]!))).toHaveLength(0);
+    expect(agg.soloCandidate(weth(wallets[0]!))).toBeNull();
+    expect(agg.firstEntryCandidate(weth(wallets[0]!))).toBeNull();
+  });
+
   it('does not count untracked wallets', () => {
     const { agg, token } = ctx;
     const now = Date.now();

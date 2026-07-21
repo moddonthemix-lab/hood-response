@@ -39,6 +39,8 @@ async function main(): Promise<void> {
     await price.refreshNow(swarm.token);
     const token = store.tokensByAddress.get(swarm.token);
     if (token) {
+      // Re-sync the symbol in case DexScreener enriched a placeholder since detection.
+      swarm.tokenSymbol = token.symbol;
       swarm.marketCap = price.marketCap(token);
       swarm.priceLive = price.isLive(swarm.token);
       swarm.dexUrl = price.dexUrl(swarm.token);
@@ -46,14 +48,8 @@ async function main(): Promise<void> {
       swarm.liquidityUsd = price.liquidityOf(swarm.token);
       swarm.dex = price.dexIdOf(swarm.token);
     }
-    // Volume/momentum confirmation: attach + boost conviction when confirmed.
-    const momentum = price.momentumOf(swarm.token);
-    if (momentum) {
-      swarm.momentum = momentum;
-      if (momentum.confirmed) {
-        swarm.conviction = Math.min(100, swarm.conviction + momentum.boost);
-      }
-    }
+    swarm.momentum = price.momentumOf(swarm.token) ?? undefined;
+
     // Pair age / freshness.
     const createdAt = price.pairCreatedAt(swarm.token);
     if (createdAt) {
@@ -63,12 +59,35 @@ async function main(): Promise<void> {
       swarm.pairAgeHours = null;
       swarm.freshPair = false;
     }
+
+    // Refine conviction with REAL data now that price/liquidity/momentum are in:
+    // reward low caps (more room to run), healthy liquidity, and momentum;
+    // penalise dangerously thin liquidity.
+    let adj = 0;
+    const mc = swarm.marketCap;
+    if (mc > 0) {
+      if (mc < 50_000) adj += 10;
+      else if (mc < 150_000) adj += 7;
+      else if (mc < 500_000) adj += 4;
+      else if (mc < 2_000_000) adj += 2;
+    }
+    const liq = swarm.liquidityUsd;
+    if (liq != null) {
+      if (liq >= 25_000) adj += 3;
+      else if (liq < 5_000) adj -= 6;
+    }
+    if (swarm.freshPair) adj += 3;
+    if (swarm.momentum?.confirmed) adj += swarm.momentum.boost;
+    swarm.conviction = Math.max(0, Math.min(100, swarm.conviction + adj));
   };
 
   // Record the swarm, then alert only if it passes the safety screen (honeypot /
   // tax / liquidity). Unsafe swarms still appear on the dashboard, tagged, but
   // never reach the notification channels.
   const recordAndMaybeAlert = async (swarm: Swarm): Promise<void> => {
+    // Re-check the ignore list against the (possibly enriched) symbol so a
+    // tokenised equity that arrived as a placeholder can't slip through.
+    if (config.ignoreSymbols.has(swarm.tokenSymbol.toUpperCase())) return;
     if (config.SAFETY_FILTER) {
       swarm.safety = await safety.check(swarm.token, price.liquidityOf(swarm.token));
     }
@@ -97,6 +116,9 @@ async function main(): Promise<void> {
 
   // Pipeline: chain → decoder → store → aggregator → alert engine → notify.
   const handleSwap = async (swap: SwapEvent): Promise<void> => {
+    // Drop settlement/quote tokens and tokenised equities before anything else —
+    // keeps the feed, stats, and token registry focused on real gems.
+    if (config.ignoreSymbols.has(swap.tokenSymbol.toUpperCase())) return;
     // Auto-register unknown tokens so brand-new coins flow through the pipeline.
     store.ensureToken(swap.token, swap.tokenSymbol);
     // Log only meaningful (non-dust) live buys/sells — these wallets can be very

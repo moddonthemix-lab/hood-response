@@ -55,6 +55,12 @@ export class Aggregator {
         if (unique < state.lastEmittedWallets) state.lastEmittedWallets = unique;
       }
     }
+    // Solo throttle entries only matter within the throttle window.
+    for (const [token, ts] of this.lastSolo) {
+      if (now - ts > SOLO_THROTTLE_MS) this.lastSolo.delete(token);
+    }
+    // Bound the first-entry memory on a very long-running process.
+    if (this.seenBuys.size > 200_000) this.seenBuys.clear();
   }
 
   /** Should this swap be considered for swarm detection? */
@@ -62,6 +68,9 @@ export class Aggregator {
     if (config.IGNORE_DUST_USD > 0 && swap.usdValue < config.IGNORE_DUST_USD) {
       return false;
     }
+    // Skip settlement/quote tokens and tokenised equities — never gems, and the
+    // quote-token leg of a real buy would otherwise fire a spurious sell.
+    if (config.ignoreSymbols.has(swap.tokenSymbol.toUpperCase())) return false;
     if (config.IGNORE_STABLECOINS) {
       const token = this.store.tokensByAddress.get(swap.token);
       if (token?.stable) return false;

@@ -94,6 +94,16 @@ const schema = z.object({
   ALERT_COOLDOWN_SECONDS: num(120),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
+  // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"
+  // doesn't register a spurious WETH sell) and tokenised equities the tracked
+  // wallets trade heavily on Robinhood Chain. Comma-separated, case-insensitive.
+  IGNORE_SYMBOLS: z
+    .string()
+    .default(
+      'WETH,WBTC,ETH,USDC,USDT,USDG,DAI,USDB,WROB,VIRTUAL,' +
+        'AAPL,TSLA,NVDA,GOOGL,GOOG,META,MSFT,AMZN,AMD,INTC,MU,NFLX,DIS,' +
+        'COIN,PLTR,ORCL,CRWV,SNDK,SPCX,USAR,BE,HOOD,SPY,QQQ',
+    ),
 
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
@@ -143,6 +153,11 @@ export const config = {
   freshEntryTiers: env.FRESH_ENTRY_TIERS.split(',')
     .map((t) => t.trim().toLowerCase())
     .filter(Boolean),
+  ignoreSymbols: new Set(
+    env.IGNORE_SYMBOLS.split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+  ),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:

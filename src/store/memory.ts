@@ -161,6 +161,12 @@ export class MemoryStore extends EventEmitter {
     }
     this.walletStats.set(e.wallet, ws);
     this.tokenStats.set(e.token, ts);
+    // Bound per-token stats on a long-running process (many discovered tokens).
+    while (this.tokenStats.size > 10_000) {
+      const oldest = this.tokenStats.keys().next().value;
+      if (oldest === undefined) break;
+      this.tokenStats.delete(oldest);
+    }
     this.emit('swap', e);
   }
 
