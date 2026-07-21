@@ -107,7 +107,7 @@ const schema = z.object({
   // record the peak + milestone returns, so signal quality is measured from
   // real results (multi-wallet vs solo, repeat vs single) instead of guessed.
   PERFORMANCE_TRACKING: bool(true),
-  PERF_SAMPLE_MINUTES: num(5),
+  PERF_SAMPLE_MINUTES: num(2),
   PERF_TRACK_HOURS: num(24),
   // A call counts as a "win" for the win-rate stat when its peak return reaches
   // this %. Tune to whatever "runner" means to you.

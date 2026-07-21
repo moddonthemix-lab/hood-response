@@ -25,6 +25,8 @@ export interface TrackedCall {
   entryMarketCap: number;
   entryAt: number;
   lastPrice: number;
+  /** Live market cap now (derived from the price move), for display. */
+  lastMarketCap: number;
   /** Current return vs entry (%). */
   lastGainPct: number;
   maxPrice: number;
@@ -82,6 +84,7 @@ function bucket(label: string, calls: TrackedCall[], winThreshold: number): Buck
 export class PerformanceTracker {
   private readonly calls = new Map<string, TrackedCall>();
   private timer: NodeJS.Timeout | null = null;
+  private soonTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly price: PriceOracle) {}
 
@@ -108,6 +111,7 @@ export class PerformanceTracker {
       entryMarketCap: swarm.marketCap,
       entryAt: now,
       lastPrice: entryPrice,
+      lastMarketCap: swarm.marketCap,
       lastGainPct: 0,
       maxPrice: entryPrice,
       maxGainPct: 0,
@@ -137,9 +141,22 @@ export class PerformanceTracker {
     );
   }
 
+  /** Sample once shortly (used right after a burst of alerts so the card
+   *  reflects the current price within seconds instead of waiting a full
+   *  interval). Debounced so a burst schedules just one extra sample. */
+  sampleSoon(): void {
+    if (!config.PERFORMANCE_TRACKING || this.soonTimer) return;
+    this.soonTimer = setTimeout(() => {
+      this.soonTimer = null;
+      void this.sample();
+    }, 20_000);
+  }
+
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.soonTimer) clearTimeout(this.soonTimer);
     this.timer = null;
+    this.soonTimer = null;
   }
 
   private async sample(): Promise<void> {
@@ -156,6 +173,7 @@ export class PerformanceTracker {
       if (p > 0) {
         c.lastPrice = p;
         c.lastGainPct = gainPct(c.entryPrice, p);
+        c.lastMarketCap = c.entryPrice > 0 ? Math.round(c.entryMarketCap * (p / c.entryPrice)) : c.entryMarketCap;
         if (p > c.maxPrice) {
           c.maxPrice = p;
           c.maxGainPct = gainPct(c.entryPrice, p);

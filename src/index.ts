@@ -34,7 +34,10 @@ async function main(): Promise<void> {
   // single) from real outcomes.
   const performance = new PerformanceTracker(price);
   performance.start();
-  store.on('alert', (a) => performance.track(a.swarm));
+  store.on('alert', (a) => {
+    performance.track(a.swarm);
+    performance.sampleSoon();
+  });
 
   const detachPersistence = await attachPersistence(store);
 

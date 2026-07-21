@@ -211,8 +211,9 @@ function perfRow(c){
   const tags='<span class="tag '+c.kind+'">'+c.kind+'</span>'+
     '<span class="tag" style="background:#12283a;color:var(--accent)" title="wallets in the alert">'+c.walletCount+'w</span>'+
     (c.repeatCount>1?'<span class="tag" style="background:'+(c.newHolder?'#7a1fa2':'#c0392b')+';color:#fff" title="repeat alerts">🔁x'+c.repeatCount+'</span>':'');
+  const ageMin=Math.floor((Date.now()-c.entryAt)/60000); const age=ageMin<60?ageMin+'m':Math.floor(ageMin/60)+'h';
   d.innerHTML=tags+'<span class="sym">'+dexLink(c.token,c.tokenSymbol)+'</span>'+
-    '<span class="grow mono">entry '+usd(c.entryMarketCap)+' MC</span>'+
+    '<span class="grow mono">'+usd(c.entryMarketCap)+' → '+usd(c.lastMarketCap||c.entryMarketCap)+' MC · '+age+' ago</span>'+
     '<span class="conv '+gc+'" title="peak return since alert">▲ '+(g>=0?'+':'')+g+'%</span>'+
     '<span class="mono" title="current return">now '+(now>=0?'+':'')+now+'%</span>';
   return d;
