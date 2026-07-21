@@ -95,6 +95,20 @@ export interface SafetyReport {
   source: 'goplus' | 'liquidity-only' | 'none';
 }
 
+/** Volume / momentum confirmation for a token at alert time. */
+export interface MomentumReport {
+  /** 24h trading volume (USD), or null if unknown. */
+  volumeUsd: number | null;
+  /** Recent price change % (1h if available, else 24h), or null. */
+  priceChangePct: number | null;
+  /** Share of buys vs sells over 24h, 0–100, or null. */
+  buyPressurePct: number | null;
+  /** True when volume + direction confirm live upward momentum. */
+  confirmed: boolean;
+  /** Conviction bonus (0–15) applied when momentum confirms. */
+  boost: number;
+}
+
 export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION' | 'SOLO';
 
 export interface Swarm {
@@ -123,6 +137,8 @@ export interface Swarm {
   priceLive: boolean;
   /** Token safety screen result, when the safety filter is enabled. */
   safety?: SafetyReport;
+  /** Volume / momentum confirmation for the token. */
+  momentum?: MomentumReport;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

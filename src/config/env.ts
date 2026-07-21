@@ -81,6 +81,10 @@ const schema = z.object({
   SAFETY_FILTER: bool(true),
   SAFETY_MIN_LIQUIDITY_USD: num(5_000),
   SAFETY_MAX_TAX_PCT: num(15),
+  // Volume/momentum confirmation. Confirmed momentum boosts conviction and is
+  // shown in alerts. Set MOMENTUM_MIN_VOLUME_USD > 0 to also SUPPRESS alerts on
+  // tokens with 24h volume below it (0 = don't gate, keep brand-new gems).
+  MOMENTUM_MIN_VOLUME_USD: num(0),
   ALERT_COOLDOWN_SECONDS: num(120),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
