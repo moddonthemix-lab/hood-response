@@ -71,6 +71,10 @@ const schema = z.object({
   ALERT_WINDOW_SECONDS: num(300),
   ALERT_MIN_USD: num(0),
   ALERT_MIN_CONVICTION: num(0),
+  // Global floors applied to EVERY alert type (swarm, solo, entry): suppress
+  // tokens below this market cap, and pairs younger than this age.
+  ALERT_MIN_MARKETCAP: num(25_000),
+  PAIR_MIN_AGE_MINUTES: num(30),
   // Solo-buy alerts: fire when a SINGLE tracked wallet buys a coin, but only
   // when its market cap is below SOLO_MAX_MARKETCAP (early low-cap gems).
   SOLO_ALERTS: bool(true),
