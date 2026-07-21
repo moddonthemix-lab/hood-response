@@ -68,6 +68,10 @@ describe('AlertEngine', () => {
 
     const over = await ctx.engine.evaluate(soloSwarm('0xhighcap', 250_000));
     expect(over).toHaveLength(0);
+
+    // Below the market-cap floor (dust) → no solo alert.
+    const dust = await ctx.engine.evaluate(soloSwarm('0xdust', 5_000));
+    expect(dust).toHaveLength(0);
   });
 
   it('does not match a solo swarm against the multi-wallet default rule', async () => {

@@ -177,6 +177,9 @@ export interface AlertRule {
   /** Only fire when the token's market cap is at or below this (USD). Omit for
    *  no cap limit. Used by solo-buy rules to target low-cap coins. */
   maxMarketCap?: number;
+  /** Only fire when the token's market cap is at or above this (USD). Omit for
+   *  no floor. Used by solo-buy rules to skip dust. */
+  minMarketCap?: number;
   /** Which directions this rule fires on. */
   kinds: SwarmKind[];
   ignoredTokens: string[];
