@@ -43,6 +43,15 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
       },
       { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
       { name: `Wallets (${s.walletCount})`, value: s.walletSummary, inline: true },
+      ...(s.momentum?.volumeUsd != null
+        ? [
+            {
+              name: `Vol 24h${s.momentum.confirmed ? ' 🔥' : ''}`,
+              value: `${usd(s.momentum.volumeUsd)}${s.momentum.priceChangePct != null ? ` (${s.momentum.priceChangePct >= 0 ? '+' : ''}${s.momentum.priceChangePct.toFixed(1)}%)` : ''}`,
+              inline: true,
+            },
+          ]
+        : []),
       ...(s.newToken ? [{ name: '🆕 Contract', value: s.token }] : []),
       { name: 'Chart', value: `[DexScreener](${s.dexUrl})`, inline: true },
     ],

@@ -39,6 +39,16 @@ export function textBody(s: Swarm): string {
     `Window: ${s.windowSeconds}s`,
     `Wallets: ${s.walletSummary}`,
   ];
+  // Volume / momentum confirmation.
+  if (s.momentum && s.momentum.volumeUsd != null) {
+    const chg =
+      s.momentum.priceChangePct != null
+        ? `${s.momentum.priceChangePct >= 0 ? '+' : ''}${s.momentum.priceChangePct.toFixed(1)}%`
+        : '?';
+    const bp = s.momentum.buyPressurePct != null ? `${s.momentum.buyPressurePct}% buys` : '';
+    const flag = s.momentum.confirmed ? ' 🔥' : '';
+    lines.push(`Volume 24h: ${usd(s.momentum.volumeUsd)} · ${chg} · ${bp}${flag}`.trimEnd());
+  }
   // Safety summary (alerts only fire when the token passed the screen).
   if (s.safety) {
     const liq = s.safety.liquidityUsd != null ? usd(s.safety.liquidityUsd) : '?';

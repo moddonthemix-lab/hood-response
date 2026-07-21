@@ -1,14 +1,19 @@
-import type { TrackedToken } from '../types.js';
+import type { MomentumReport, TrackedToken } from '../types.js';
 import type { MemoryStore } from '../store/memory.js';
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import { dexScreenerUrl } from '../links.js';
+import { computeMomentum } from './momentum.js';
 
 interface LivePrice {
   priceUsd: number;
   marketCap: number;
   liquidityUsd: number | null;
   pairCreatedAt: number | null;
+  volume24: number | null;
+  priceChangePct: number | null;
+  buys24: number | null;
+  sells24: number | null;
   pairAddress: string;
   chainId: string;
   fetchedAt: number;
@@ -23,6 +28,9 @@ interface DexPair {
   fdv?: number;
   liquidity?: { usd?: number };
   pairCreatedAt?: number;
+  volume?: { h24?: number; h6?: number; h1?: number };
+  priceChange?: { h24?: number; h6?: number; h1?: number };
+  txns?: { h24?: { buys?: number; sells?: number } };
 }
 
 const TTL_MS = 60_000;
@@ -120,6 +128,18 @@ export class PriceOracle {
     return this.fresh(tokenAddress)?.pairCreatedAt ?? null;
   }
 
+  /** Volume/momentum confirmation for the token, or null if no live pair. */
+  momentumOf(tokenAddress: string): MomentumReport | null {
+    const l = this.fresh(tokenAddress);
+    if (!l) return null;
+    return computeMomentum({
+      volumeUsd: l.volume24,
+      priceChangePct: l.priceChangePct,
+      buys: l.buys24,
+      sells: l.sells24,
+    });
+  }
+
   /**
    * Fetch this token's price/market cap right now if we don't already have a
    * fresh value. Used at alert time so the market cap in a notification is the
@@ -195,6 +215,10 @@ export class PriceOracle {
         marketCap: best.marketCap ?? best.fdv ?? 0,
         liquidityUsd: best.liquidity?.usd ?? null,
         pairCreatedAt: best.pairCreatedAt ?? null,
+        volume24: best.volume?.h24 ?? null,
+        priceChangePct: best.priceChange?.h1 ?? best.priceChange?.h24 ?? null,
+        buys24: best.txns?.h24?.buys ?? null,
+        sells24: best.txns?.h24?.sells ?? null,
         pairAddress: best.pairAddress ?? '',
         chainId: best.chainId ?? config.DEXSCREENER_CHAIN,
         fetchedAt: Date.now(),

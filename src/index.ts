@@ -43,6 +43,14 @@ async function main(): Promise<void> {
       swarm.priceLive = price.isLive(swarm.token);
       swarm.dexUrl = price.dexUrl(swarm.token);
     }
+    // Volume/momentum confirmation: attach + boost conviction when confirmed.
+    const momentum = price.momentumOf(swarm.token);
+    if (momentum) {
+      swarm.momentum = momentum;
+      if (momentum.confirmed) {
+        swarm.conviction = Math.min(100, swarm.conviction + momentum.boost);
+      }
+    }
   };
 
   // Record the swarm, then alert only if it passes the safety screen (honeypot /
@@ -57,6 +65,18 @@ async function main(): Promise<void> {
       logger.info(
         { token: swarm.tokenSymbol, fails: swarm.safety.hardFails },
         'alert suppressed by safety filter',
+      );
+      return;
+    }
+    // Optional volume gate: drop dead tokens when a minimum is configured.
+    if (
+      config.MOMENTUM_MIN_VOLUME_USD > 0 &&
+      swarm.momentum?.volumeUsd != null &&
+      swarm.momentum.volumeUsd < config.MOMENTUM_MIN_VOLUME_USD
+    ) {
+      logger.info(
+        { token: swarm.tokenSymbol, volume: swarm.momentum.volumeUsd },
+        'alert suppressed: below minimum volume',
       );
       return;
     }
