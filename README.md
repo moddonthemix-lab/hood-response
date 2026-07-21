@@ -27,6 +27,8 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |
 | **Rotation detection** | wallets SELL token A then BUY token B → rotation alert |
+| **Noise filter** | settlement/quote tokens (WETH, USDC, USDG…) and tokenised equities (AAPL, TSLA, NVDA…) are dropped before detection via `IGNORE_SYMBOLS`, so the feed and alerts stay focused on real gems (no spurious "sold WETH" leg on every buy) |
+| **Conviction refinement** | after detection, conviction is re-scored with the *real* market cap, liquidity and momentum — low caps and healthy liquidity get a boost, dangerously thin liquidity a penalty — so the best low-cap gems rank highest |
 | **Wallet tiers** | each wallet is tiered by its best top-10 holder rank across the tracked coins — **alpha** (rank 1–3), **beta** (4–6), **chroma** (7–9), **delta** (10) — which anchors its confidence and feeds the conviction score; alert makeup reads e.g. "2 alpha · 1 beta" |
 | **Conviction score** | 0–100 from wallet quality (tier), count, capital, velocity, liquidity, market cap, historical accuracy, buy/sell ratio |
 | **Live prices & market cap** | real USD price / market cap / pair link from DexScreener (cached, background-refreshed, chain-filtered) when `DEXSCREENER_CHAIN` is set; deterministic synthetic fallback (marked `est`) otherwise |

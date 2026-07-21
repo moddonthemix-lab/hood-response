@@ -40,6 +40,18 @@ const TTL_MS = 60_000;
 // Tokens re-priced per refresh tick. Each is a separate request because the
 // multi-token endpoint caps at 30 pairs *total*, which starves busy tokens.
 const MAX_PER_TICK = 12;
+// Bound the caches on a long-running process (many discovered tokens).
+const MAX_CACHE = 5_000;
+const LIVE_STALE_MS = 30 * 60_000;
+
+/** Evict oldest-inserted entries until the map is under `max`. */
+function capMap<T>(map: Map<string, T>, max: number): void {
+  while (map.size > max) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
 
 /**
  * USD price / market-cap oracle.
@@ -82,6 +94,7 @@ export class PriceOracle {
     if (p === undefined) {
       p = this.derive(address);
       this.synthetic.set(address, p);
+      if (this.synthetic.size > MAX_CACHE) capMap(this.synthetic, MAX_CACHE);
     }
     return p;
   }
@@ -191,6 +204,11 @@ export class PriceOracle {
     if (this.store) {
       for (const addr of this.store.tokensByAddress.keys()) this.maybeEnqueue(addr);
     }
+    // Evict stale/overflowing live prices.
+    const staleBefore = Date.now() - LIVE_STALE_MS;
+    for (const [addr, l] of this.live) if (l.fetchedAt < staleBefore) this.live.delete(addr);
+    capMap(this.live, MAX_CACHE);
+
     if (this.queue.size === 0) return;
     const batch = [...this.queue].slice(0, MAX_PER_TICK);
     for (const a of batch) this.queue.delete(a);

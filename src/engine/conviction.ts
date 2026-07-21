@@ -14,16 +14,21 @@ export interface ConvictionInput {
   marketCap: number;
 }
 
-/** Weights sum to 1. Tuned so wallet quality and count dominate. */
+/**
+ * Weights sum to 1. Wallet quality (tier) and directional purity dominate; the
+ * synthetic token-side factors (liquidity/market cap here) are intentionally
+ * light because the pipeline refines conviction with the *real* market cap,
+ * liquidity and momentum once the DexScreener data is fetched at alert time.
+ */
 const WEIGHTS: Record<keyof ConvictionBreakdown, number> = {
-  walletQuality: 0.22,
-  walletCount: 0.2,
-  totalCapital: 0.16,
+  walletQuality: 0.3,
+  walletCount: 0.18,
+  totalCapital: 0.14,
   velocity: 0.12,
-  liquidity: 0.08,
-  marketCap: 0.08,
-  historicalAccuracy: 0.08,
-  buySellRatio: 0.06,
+  liquidity: 0.04,
+  marketCap: 0.06,
+  historicalAccuracy: 0.06,
+  buySellRatio: 0.1,
 };
 
 const clamp100 = (n: number): number => Math.max(0, Math.min(100, n));

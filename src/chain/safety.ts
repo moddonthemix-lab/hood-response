@@ -148,6 +148,11 @@ export class SafetyChecker {
     const gp = await this.fetchGoPlus(key);
     const report = evaluateSafety(gp, liquidityUsd, this.thresholds());
     this.cache.set(key, report);
+    while (this.cache.size > 5_000) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
     return report;
   }
 }
