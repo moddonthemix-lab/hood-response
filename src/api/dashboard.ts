@@ -84,6 +84,11 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
     <div class="body" id="newcoins"><div class="empty">no new-coin swarms yet</div></div>
   </section>
 
+  <section class="card full">
+    <h2>🏆 Best Calls <span class="mono" id="perf-note">— outcome of each alert (peak vs entry)</span></h2>
+    <div class="body" id="perf"><div class="empty">no tracked calls yet — fills in after live alerts</div></div>
+  </section>
+
   <section class="card">
     <h2>Live Feed <span class="mono" id="feed-count"></span></h2>
     <div class="body" id="feed"><div class="empty">waiting for swaps…</div></div>
@@ -200,6 +205,31 @@ async function loadTables(){
     wb.appendChild(tr); }
 }
 
+function perfRow(c){
+  const d=document.createElement('div'); d.className='row';
+  const g=c.maxGainPct, now=c.lastGainPct; const gc=g>=50?'hi':g>=0?'mid':'lo';
+  const tags='<span class="tag '+c.kind+'">'+c.kind+'</span>'+
+    '<span class="tag" style="background:#12283a;color:var(--accent)" title="wallets in the alert">'+c.walletCount+'w</span>'+
+    (c.repeatCount>1?'<span class="tag" style="background:'+(c.newHolder?'#7a1fa2':'#c0392b')+';color:#fff" title="repeat alerts">🔁x'+c.repeatCount+'</span>':'');
+  d.innerHTML=tags+'<span class="sym">'+dexLink(c.token,c.tokenSymbol)+'</span>'+
+    '<span class="grow mono">entry '+usd(c.entryMarketCap)+' MC</span>'+
+    '<span class="conv '+gc+'" title="peak return since alert">▲ '+(g>=0?'+':'')+g+'%</span>'+
+    '<span class="mono" title="current return">now '+(now>=0?'+':'')+now+'%</span>';
+  return d;
+}
+async function loadPerformance(){
+  let d; try{ d=await fetch('/api/performance?limit=25').then(r=>r.json()); }catch(e){ return; }
+  const el=$('perf');
+  if(!d.enabled){ el.innerHTML='<div class="empty">performance tracking off</div>'; return; }
+  const calls=d.calls||[]; el.innerHTML='';
+  if(!calls.length){ el.innerHTML='<div class="empty">no tracked calls yet — fills in after live alerts</div>'; }
+  else calls.forEach(c=>el.appendChild(perfRow(c)));
+  const s=d.summary;
+  if(s){ const mw=(s.byWalletCount||[])[0], rp=(s.byRepeat||[])[0];
+    $('perf-note').textContent='— '+s.total+' calls · multi-wallet win '+(mw?mw.winRatePct:0)+'% · repeat win '+(rp?rp.winRatePct:0)+'% (peak ≥'+s.winThresholdPct+'%)';
+  }
+}
+
 async function loadMuted(){
   let st; try{ st=await fetch('/api/muted').then(r=>r.json()); }catch(e){ return; }
   const muted=new Set(st.muted||[]);
@@ -243,7 +273,9 @@ async function boot(){
 
   await loadTables();
   await loadMuted();
+  await loadPerformance();
   setInterval(loadTables, 8000);
+  setInterval(loadPerformance, 30000);
 
   const es=new EventSource('/events');
   let swaps=stats.totals.swaps, sw=stats.totals.swarms, al=stats.totals.alerts;

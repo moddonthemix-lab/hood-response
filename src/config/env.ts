@@ -103,6 +103,15 @@ const schema = z.object({
   // keeps drawing tracked-wallet interest even though the per-token cooldown
   // hides the individual re-fires.
   REPEAT_WINDOW_MINUTES: num(35),
+  // Outcome tracking: after each alert fires, follow the token's price and
+  // record the peak + milestone returns, so signal quality is measured from
+  // real results (multi-wallet vs solo, repeat vs single) instead of guessed.
+  PERFORMANCE_TRACKING: bool(true),
+  PERF_SAMPLE_MINUTES: num(5),
+  PERF_TRACK_HOURS: num(24),
+  // A call counts as a "win" for the win-rate stat when its peak return reaches
+  // this %. Tune to whatever "runner" means to you.
+  PERF_WIN_THRESHOLD_PCT: num(50),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"

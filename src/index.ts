@@ -9,6 +9,7 @@ import { attachPersistence } from './store/persistence.js';
 import { buildServer } from './api/server.js';
 import { configuredChannels } from './notify/index.js';
 import { SafetyChecker } from './chain/safety.js';
+import { PerformanceTracker } from './engine/performance.js';
 import type { Swarm, SwapEvent } from './types.js';
 
 async function main(): Promise<void> {
@@ -27,6 +28,13 @@ async function main(): Promise<void> {
   price.start();
   const aggregator = new Aggregator(store, price);
   const engine = new AlertEngine(store, aggregator);
+
+  // Follow every fired alert and record how the token actually performed, so we
+  // can measure which signals produce runners (multi-wallet vs solo, repeat vs
+  // single) from real outcomes.
+  const performance = new PerformanceTracker(price);
+  performance.start();
+  store.on('alert', (a) => performance.track(a.swarm));
 
   const detachPersistence = await attachPersistence(store);
 
@@ -187,7 +195,7 @@ async function main(): Promise<void> {
   const listener = createListener(store, price, (swap) => void handleSwap(swap));
   listener.start();
 
-  const app = await buildServer(store, engine, aggregator);
+  const app = await buildServer(store, engine, aggregator, performance);
   await app.listen({ port: config.PORT, host: config.HOST });
   logger.info(
     { url: `http://${config.HOST}:${config.PORT}`, wallets: store.wallets.size },
@@ -201,6 +209,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down gracefully');
     listener.stop();
     price.stop();
+    performance.stop();
     await app.close().catch(() => undefined);
     await detachPersistence();
     process.exit(0);

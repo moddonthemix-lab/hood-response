@@ -6,6 +6,7 @@ import { logger } from '../logger.js';
 import type { MemoryStore } from '../store/memory.js';
 import type { AlertEngine } from '../engine/alertEngine.js';
 import type { Aggregator } from '../engine/aggregator.js';
+import type { PerformanceTracker } from '../engine/performance.js';
 import { configuredChannels, dispatch } from '../notify/index.js';
 import type { Alert, AlertRule, Swarm, SwapEvent, WalletCategory } from '../types.js';
 import { DASHBOARD_HTML } from './dashboard.js';
@@ -68,6 +69,7 @@ export async function buildServer(
   store: MemoryStore,
   engine: AlertEngine,
   aggregator: Aggregator,
+  performance?: PerformanceTracker,
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
@@ -178,6 +180,13 @@ export async function buildServer(
     store.mutedTokens.delete(sym);
     logger.info({ symbol: sym }, 'unmuted wallet group');
     return mutedState();
+  });
+
+  // ── Performance / outcomes ─────────────────────────────────────────────────────
+  app.get('/api/performance', async (req) => {
+    if (!performance) return { enabled: false, calls: [], summary: null };
+    const limit = clampLimit((req.query as { limit?: string }).limit);
+    return { enabled: true, summary: performance.summary(), calls: performance.list().slice(0, limit) };
   });
 
   // ── Feeds ────────────────────────────────────────────────────────────────────
