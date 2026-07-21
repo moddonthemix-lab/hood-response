@@ -35,4 +35,27 @@ describe('seed data', () => {
     const multi = SEED_WALLETS.filter((w) => w.holdsTokens.length > 1);
     expect(multi).toHaveLength(5);
   });
+
+  it('assigns every wallet a tier consistent with its best rank', () => {
+    const tiers = new Set(['alpha', 'beta', 'chroma', 'delta']);
+    for (const w of SEED_WALLETS) {
+      expect(tiers.has(w.tier)).toBe(true);
+      expect(w.rank).toBeGreaterThanOrEqual(1);
+      const expected =
+        w.rank <= 3 ? 'alpha' : w.rank <= 6 ? 'beta' : w.rank <= 9 ? 'chroma' : 'delta';
+      expect(w.tier).toBe(expected);
+    }
+    // At least one wallet in each of the strongest tiers exists.
+    expect(SEED_WALLETS.some((w) => w.tier === 'alpha')).toBe(true);
+    expect(SEED_WALLETS.some((w) => w.tier === 'delta')).toBe(true);
+  });
+
+  it('rank-1 holders are alpha with high confidence', () => {
+    const rank1 = SEED_WALLETS.filter((w) => w.rank === 1);
+    expect(rank1.length).toBeGreaterThan(0);
+    for (const w of rank1) {
+      expect(w.tier).toBe('alpha');
+      expect(w.confidence).toBeGreaterThanOrEqual(0.9);
+    }
+  });
 });

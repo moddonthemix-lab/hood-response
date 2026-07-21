@@ -180,33 +180,21 @@ export class Aggregator {
   }
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  internal: 'smart-money',
-  vc: 'VC',
-  whale: 'whale',
-  market_maker: 'market-maker',
-  influencer: 'influencer',
-  developer: 'dev',
-  retail: 'retail',
-  unknown: 'wallet',
-};
+const TIER_ORDER = ['alpha', 'beta', 'chroma', 'delta'];
 
 /**
- * Build a privacy-preserving makeup string from wallet categories, e.g.
- * "2 smart-money · 1 whale · 1 retail" — no addresses are exposed.
+ * Build a privacy-preserving makeup string from wallet tiers, e.g.
+ * "2 alpha · 1 beta · 1 delta" — no addresses are exposed.
  */
-function summarizeWallets(
-  wallets: { category: string }[],
-  total: number,
-): string {
+function summarizeWallets(wallets: { tier?: string }[], total: number): string {
   if (wallets.length === 0) return `${total} tracked`;
   const counts = new Map<string, number>();
   for (const w of wallets) {
-    const label = CATEGORY_LABEL[w.category] ?? 'wallet';
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+    const tier = w.tier ?? 'unknown';
+    counts.set(tier, (counts.get(tier) ?? 0) + 1);
   }
   return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, n]) => `${n} ${label}`)
+    .sort((a, b) => (TIER_ORDER.indexOf(a[0]) - TIER_ORDER.indexOf(b[0])) || b[1] - a[1])
+    .map(([tier, n]) => `${n} ${tier}`)
     .join(' · ');
 }

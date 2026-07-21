@@ -105,7 +105,7 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
 
   <section class="card full">
     <h2>Tracked Wallets <span class="mono" id="wallet-count"></span></h2>
-    <div class="body"><table id="wallets"><thead><tr><th>Label</th><th>Category</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
+    <div class="body"><table id="wallets"><thead><tr><th>Tier</th><th>Label</th><th class="num">Rank</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
   </section>
 </main>
 
@@ -182,7 +182,7 @@ async function loadTables(){
   $('wallet-count').textContent=wallets.length+' tracked';
   const wb=$('wallets').querySelector('tbody'); wb.innerHTML='';
   for(const w of wallets){ const s=w.stats||{buys:0,sells:0}; const tr=document.createElement('tr');
-    tr.innerHTML='<td>'+w.label+'</td><td class="mono">'+w.category+'</td><td class="num">'+w.confidence.toFixed(2)+'</td><td class="num">'+(s.buys||0)+'</td><td class="num">'+(s.sells||0)+'</td>';
+    tr.innerHTML='<td class="sym">'+(w.tier||'?')+'</td><td>'+w.label+'</td><td class="num">'+(w.rank||'')+'</td><td class="num">'+w.confidence.toFixed(2)+'</td><td class="num">'+(s.buys||0)+'</td><td class="num">'+(s.sells||0)+'</td>';
     wb.appendChild(tr); }
 }
 
