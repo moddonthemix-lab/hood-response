@@ -85,6 +85,12 @@ const schema = z.object({
   // shown in alerts. Set MOMENTUM_MIN_VOLUME_USD > 0 to also SUPPRESS alerts on
   // tokens with 24h volume below it (0 = don't gate, keep brand-new gems).
   MOMENTUM_MIN_VOLUME_USD: num(0),
+  // Fresh-pair + first-entry alerts: fire when a qualifying-tier wallet makes
+  // its first-ever buy of a token whose pair is younger than the max age. The
+  // purest "ground floor" signal.
+  FRESH_ENTRY_ALERTS: bool(true),
+  FRESH_PAIR_MAX_AGE_HOURS: num(48),
+  FRESH_ENTRY_TIERS: z.string().default('alpha,beta'),
   ALERT_COOLDOWN_SECONDS: num(120),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
@@ -132,6 +138,9 @@ export const config = {
   chainMode,
   hasDatabase: env.DATABASE_URL.length > 0,
   hasRedis: env.REDIS_URL.length > 0,
+  freshEntryTiers: env.FRESH_ENTRY_TIERS.split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:

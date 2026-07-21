@@ -38,8 +38,26 @@ function defaultRules(): AlertRule[] {
       ignoredWallets: [],
     });
   }
+  if (config.FRESH_ENTRY_ALERTS) {
+    rules.push({
+      id: 'fresh-entry',
+      name: 'Fresh-pair first entry',
+      enabled: true,
+      minWallets: 1,
+      windowSeconds: config.ALERT_WINDOW_SECONDS,
+      minUsd: config.ALERT_MIN_USD,
+      minConviction: 0,
+      cooldownSeconds: config.ALERT_COOLDOWN_SECONDS,
+      kinds: ['ENTRY'],
+      ignoredTokens: [],
+      ignoredWallets: [],
+    });
+  }
   return rules;
 }
+
+/** Kinds that describe a single-wallet event, excluded from the swarm floor. */
+const SINGLE_WALLET_KINDS = new Set(['SOLO', 'ENTRY']);
 
 /**
  * Turns raw swarm candidates into alerts by evaluating them against the set of
@@ -67,7 +85,7 @@ export class AlertEngine {
   private syncAggregator(): void {
     const enabled = [...this.store.rules.values()].filter((r) => r.enabled);
     if (enabled.length === 0) return;
-    const multi = enabled.filter((r) => r.kinds.some((k) => k !== 'SOLO'));
+    const multi = enabled.filter((r) => r.kinds.some((k) => !SINGLE_WALLET_KINDS.has(k)));
     if (multi.length > 0) {
       this.aggregator.detectionFloor = Math.max(1, Math.min(...multi.map((r) => r.minWallets)));
       this.aggregator.maxWindowSeconds = Math.max(...multi.map((r) => r.windowSeconds));

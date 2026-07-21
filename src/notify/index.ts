@@ -28,7 +28,9 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
         ? 0xdc2626
         : s.kind === 'SOLO'
           ? 0xf0b429
-          : 0x7c3aed;
+          : s.kind === 'ENTRY'
+            ? 0x22c55e
+            : 0x7c3aed;
   const embed = {
     title: headline(s),
     url: s.dexUrl, // makes the title a clickable DexScreener link

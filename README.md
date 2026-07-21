@@ -22,6 +22,7 @@ Built from the *Robinhood Chain Alpha Intelligence* spec and seeded with the
 | **Swarm detection** | ≥ N unique tracked wallets BUY the same token within a window → alert |
 | **Safety filter** | before any alert fires, the token is screened via GoPlus token-security (honeypot, buy/sell tax, mintable, ownership, LP lock — supported on Robinhood Chain) + a minimum DEX liquidity check; rugs/honeypots are suppressed (still shown on the dashboard, tagged). Tunable via `SAFETY_*`, degrades to a liquidity-only check if GoPlus is unreachable |
 | **Solo low-cap alerts** | a *single* tracked wallet buying a coin fires an alert too — but only when the token's market cap is under `SOLO_MAX_MARKETCAP` (default $100k), to catch early low-cap entries without noise from large caps |
+| **Fresh-pair first entry** | fires when a qualifying-tier wallet (`FRESH_ENTRY_TIERS`, default alpha+beta) makes its *first-ever* buy of a token whose DEX pair is younger than `FRESH_PAIR_MAX_AGE_HOURS` (default 48h) — the purest "ground floor" signal |
 | **Real market cap** | market cap is fetched live from DexScreener at alert time (not just the cached/synthetic value), so every alert reports the true cap it was bought/sold into |
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |
 | **Sell detection** | ≥ N wallets SELL the same token → bearish alert |

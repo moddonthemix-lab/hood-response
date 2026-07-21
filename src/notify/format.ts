@@ -5,6 +5,7 @@ export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   SELL: '🔴🪰',
   ROTATION: '🔄🪰',
   SOLO: '🕵️🪰',
+  ENTRY: '🌱🪰',
 };
 
 export function usd(n: number): string {
@@ -21,6 +22,10 @@ export function headline(s: Swarm): string {
   }
   if (s.kind === 'SOLO') {
     return `${e} ${tag}SOLO BUY — a tracked wallet is aping ${s.tokenSymbol} (low cap)`;
+  }
+  if (s.kind === 'ENTRY') {
+    const age = s.pairAgeHours != null ? `${s.pairAgeHours}h-old` : 'fresh';
+    return `${e} ${tag}FIRST ENTRY — a top wallet just aped ${s.tokenSymbol} (${age} pair)`;
   }
   const verb = s.kind === 'BUY' ? 'accumulating' : 'dumping';
   return `${e} ${tag}SWARM — ${s.walletCount} wallets ${verb} ${s.tokenSymbol}`;
@@ -57,6 +62,8 @@ export function textBody(s: Swarm): string {
     lines.push(`Liquidity: ${liq} · Tax ${bt}/${st}% · ✅ passed safety`);
     if (s.safety.warnings.length) lines.push(`⚠️ ${s.safety.warnings.join(', ')}`);
   }
+  // Fresh-pair context.
+  if (s.freshPair && s.pairAgeHours != null) lines.push(`🌱 Fresh pair: ${s.pairAgeHours}h old`);
   // For freshly discovered coins, surface the contract so it's actionable.
   if (s.newToken) lines.push(`Contract: ${s.token}`);
   lines.push(`Chart: ${s.dexUrl}`);
