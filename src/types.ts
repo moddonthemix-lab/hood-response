@@ -67,7 +67,7 @@ export interface ConvictionBreakdown {
   buySellRatio: number;
 }
 
-export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION';
+export type SwarmKind = 'BUY' | 'SELL' | 'ROTATION' | 'SOLO';
 
 export interface Swarm {
   id: string;
@@ -109,6 +109,9 @@ export interface AlertRule {
   minUsd: number;
   minConviction: number;
   cooldownSeconds: number;
+  /** Only fire when the token's market cap is at or below this (USD). Omit for
+   *  no cap limit. Used by solo-buy rules to target low-cap coins. */
+  maxMarketCap?: number;
   /** Which directions this rule fires on. */
   kinds: SwarmKind[];
   ignoredTokens: string[];

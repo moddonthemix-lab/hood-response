@@ -56,7 +56,8 @@ const ruleBody = z.object({
   minUsd: z.number().min(0).default(0),
   minConviction: z.number().min(0).max(100).default(0),
   cooldownSeconds: z.number().min(0).max(86400).default(120),
-  kinds: z.array(z.enum(['BUY', 'SELL', 'ROTATION'])).min(1),
+  maxMarketCap: z.number().min(0).optional(),
+  kinds: z.array(z.enum(['BUY', 'SELL', 'ROTATION', 'SOLO'])).min(1),
   ignoredTokens: z.array(z.string()).default([]),
   ignoredWallets: z.array(z.string()).default([]),
 });

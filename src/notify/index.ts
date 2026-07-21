@@ -21,7 +21,14 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 }
 
 async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery> {
-  const color = s.kind === 'BUY' ? 0x16a34a : s.kind === 'SELL' ? 0xdc2626 : 0x7c3aed;
+  const color =
+    s.kind === 'BUY'
+      ? 0x16a34a
+      : s.kind === 'SELL'
+        ? 0xdc2626
+        : s.kind === 'SOLO'
+          ? 0xf0b429
+          : 0x7c3aed;
   const embed = {
     title: headline(s),
     url: s.dexUrl, // makes the title a clickable DexScreener link

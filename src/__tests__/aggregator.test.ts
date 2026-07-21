@@ -101,6 +101,19 @@ describe('Aggregator', () => {
     expect(token?.discovered).toBe(true);
   });
 
+  it('emits a throttled solo-buy candidate for a single tracked-wallet buy', () => {
+    const { agg, wallets, token } = ctx;
+    const now = Date.now();
+    const solo = agg.soloCandidate(swap(wallets[0]!, token, 'BUY', now));
+    expect(solo).not.toBeNull();
+    expect(solo!.kind).toBe('SOLO');
+    expect(solo!.walletCount).toBe(1);
+    // Throttled: a second buy of the same token right away yields nothing.
+    expect(agg.soloCandidate(swap(wallets[1]!, token, 'BUY', now + 1000))).toBeNull();
+    // Sells never produce solo candidates.
+    expect(agg.soloCandidate(swap(wallets[2]!, token, 'SELL', now))).toBeNull();
+  });
+
   it('detects rotation when sellers of one token buy another', () => {
     const { store, agg, wallets } = ctx;
     const tokenA = store.tokensBySymbol.get('CASHCAT')!.address;

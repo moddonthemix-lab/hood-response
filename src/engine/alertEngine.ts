@@ -6,20 +6,39 @@ import type { Alert, AlertRule, Swarm } from '../types.js';
 import { dispatch } from '../notify/index.js';
 import type { Aggregator } from './aggregator.js';
 
-function defaultRule(): AlertRule {
-  return {
-    id: 'default',
-    name: 'Default swarm rule',
-    enabled: true,
-    minWallets: config.ALERT_MIN_WALLETS,
-    windowSeconds: config.ALERT_WINDOW_SECONDS,
-    minUsd: config.ALERT_MIN_USD,
-    minConviction: config.ALERT_MIN_CONVICTION,
-    cooldownSeconds: config.ALERT_COOLDOWN_SECONDS,
-    kinds: ['BUY', 'SELL', 'ROTATION'],
-    ignoredTokens: [],
-    ignoredWallets: [],
-  };
+function defaultRules(): AlertRule[] {
+  const rules: AlertRule[] = [
+    {
+      id: 'default',
+      name: 'Default swarm rule',
+      enabled: true,
+      minWallets: config.ALERT_MIN_WALLETS,
+      windowSeconds: config.ALERT_WINDOW_SECONDS,
+      minUsd: config.ALERT_MIN_USD,
+      minConviction: config.ALERT_MIN_CONVICTION,
+      cooldownSeconds: config.ALERT_COOLDOWN_SECONDS,
+      kinds: ['BUY', 'SELL', 'ROTATION'],
+      ignoredTokens: [],
+      ignoredWallets: [],
+    },
+  ];
+  if (config.SOLO_ALERTS) {
+    rules.push({
+      id: 'solo-lowcap',
+      name: 'Solo low-cap buy',
+      enabled: true,
+      minWallets: 1,
+      windowSeconds: config.ALERT_WINDOW_SECONDS,
+      minUsd: config.ALERT_MIN_USD,
+      minConviction: 0,
+      cooldownSeconds: config.ALERT_COOLDOWN_SECONDS,
+      maxMarketCap: config.SOLO_MAX_MARKETCAP,
+      kinds: ['SOLO'],
+      ignoredTokens: [],
+      ignoredWallets: [],
+    });
+  }
+  return rules;
 }
 
 /**
@@ -36,19 +55,23 @@ export class AlertEngine {
     private readonly store: MemoryStore,
     private readonly aggregator: Aggregator,
   ) {
-    if (this.store.rules.size === 0) this.store.rules.set('default', defaultRule());
+    if (this.store.rules.size === 0) {
+      for (const r of defaultRules()) this.store.rules.set(r.id, r);
+    }
     this.syncAggregator();
   }
 
-  /** Keep the aggregator's detection floor/window aligned with enabled rules. */
+  /** Keep the aggregator's detection floor/window aligned with enabled rules.
+   *  Solo-only rules (SOLO kind) are excluded from the multi-wallet floor so a
+   *  1-wallet solo rule never lowers the swarm threshold to 1. */
   private syncAggregator(): void {
     const enabled = [...this.store.rules.values()].filter((r) => r.enabled);
     if (enabled.length === 0) return;
-    this.aggregator.detectionFloor = Math.max(
-      1,
-      Math.min(...enabled.map((r) => r.minWallets)),
-    );
-    this.aggregator.maxWindowSeconds = Math.max(...enabled.map((r) => r.windowSeconds));
+    const multi = enabled.filter((r) => r.kinds.some((k) => k !== 'SOLO'));
+    if (multi.length > 0) {
+      this.aggregator.detectionFloor = Math.max(1, Math.min(...multi.map((r) => r.minWallets)));
+      this.aggregator.maxWindowSeconds = Math.max(...multi.map((r) => r.windowSeconds));
+    }
   }
 
   listRules(): AlertRule[] {
@@ -78,6 +101,10 @@ export class AlertEngine {
     if (effective.length < rule.minWallets) return false;
     if (swarm.totalUsd < rule.minUsd) return false;
     if (swarm.conviction < rule.minConviction) return false;
+    // Low-cap-only rules (solo buys): require a known market cap under the cap.
+    if (rule.maxMarketCap != null) {
+      if (swarm.marketCap <= 0 || swarm.marketCap > rule.maxMarketCap) return false;
+    }
     return true;
   }
 
