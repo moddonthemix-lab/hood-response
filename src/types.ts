@@ -92,7 +92,7 @@ export interface SafetyReport {
   /** Non-blocking concerns (mintable, unlocked LP, unverified, …). */
   warnings: string[];
   /** Where the verdict came from. */
-  source: 'goplus' | 'liquidity-only' | 'none';
+  source: 'goplus' | 'blockscout' | 'liquidity-only' | 'none';
 }
 
 /** Volume / momentum confirmation for a token at alert time. */

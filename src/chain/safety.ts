@@ -47,10 +47,15 @@ export interface SafetyThresholds {
  * Pure evaluation — no network — so it is fully unit-testable. `gp` is null when
  * GoPlus data is unavailable.
  */
+export interface BlockscoutMeta {
+  verified: boolean | null;
+}
+
 export function evaluateSafety(
   gp: GoPlusToken | null,
   liquidityUsd: number | null,
   t: SafetyThresholds,
+  bs?: BlockscoutMeta | null,
 ): SafetyReport {
   const hardFails: string[] = [];
   const warnings: string[] = [];
@@ -94,9 +99,21 @@ export function evaluateSafety(
     if (gp.lp_holders && gp.lp_holders.length > 0 && lockedPct < 0.5) {
       warnings.push('LP not locked');
     }
+  } else if (bs) {
+    // GoPlus had no data yet (common for brand-new tokens): fall back to the
+    // explorer's contract-verification status as a partial signal.
+    if (bs.verified === false) warnings.push('unverified contract');
   } else {
     warnings.push('safety data unavailable');
   }
+
+  const source: SafetyReport['source'] = gp
+    ? 'goplus'
+    : bs
+      ? 'blockscout'
+      : liquidityUsd != null
+        ? 'liquidity-only'
+        : 'none';
 
   return {
     ok: hardFails.length === 0,
@@ -107,7 +124,7 @@ export function evaluateSafety(
     honeypot,
     hardFails,
     warnings,
-    source: gp ? 'goplus' : liquidityUsd != null ? 'liquidity-only' : 'none',
+    source,
   };
 }
 
@@ -122,7 +139,7 @@ export class SafetyChecker {
     };
   }
 
-  private async fetchGoPlus(address: string): Promise<GoPlusToken | null> {
+  private async goPlusOnce(address: string): Promise<GoPlusToken | null> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 6000);
     try {
@@ -130,9 +147,37 @@ export class SafetyChecker {
       const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) return null;
       const json = (await res.json()) as { result?: Record<string, GoPlusToken> };
-      return json.result?.[address.toLowerCase()] ?? null;
+      const row = json.result?.[address.toLowerCase()];
+      // GoPlus returns an empty object for a token it hasn't scanned yet.
+      return row && Object.keys(row).length > 0 ? row : null;
     } catch (err) {
       logger.debug({ err: String(err) }, 'goplus fetch failed');
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** GoPlus scans unseen tokens on first request, so retry once after a beat. */
+  private async fetchGoPlus(address: string): Promise<GoPlusToken | null> {
+    const first = await this.goPlusOnce(address);
+    if (first) return first;
+    await new Promise((r) => setTimeout(r, 2500));
+    return this.goPlusOnce(address);
+  }
+
+  /** Explorer contract-verification status, as a partial fallback signal. */
+  private async fetchBlockscout(address: string): Promise<BlockscoutMeta | null> {
+    const base = config.EXPLORER_BASE.replace(/\/$/, '');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch(`${base}/api/v2/smart-contracts/${address}`, { signal: ctrl.signal });
+      if (res.status === 404) return { verified: false };
+      if (!res.ok) return null;
+      const json = (await res.json()) as { is_verified?: boolean };
+      return { verified: json.is_verified ?? true };
+    } catch {
       return null;
     } finally {
       clearTimeout(timer);
@@ -146,7 +191,8 @@ export class SafetyChecker {
     if (cached && Date.now() - cached.checkedAt < SafetyChecker.TTL_MS) return cached;
 
     const gp = await this.fetchGoPlus(key);
-    const report = evaluateSafety(gp, liquidityUsd, this.thresholds());
+    const bs = gp ? null : await this.fetchBlockscout(key);
+    const report = evaluateSafety(gp, liquidityUsd, this.thresholds(), bs);
     this.cache.set(key, report);
     while (this.cache.size > 5_000) {
       const oldest = this.cache.keys().next().value;
