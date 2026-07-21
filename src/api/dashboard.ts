@@ -139,7 +139,12 @@ const newBadge = (s) => s.newToken ? '<span class="tag NEW">NEW</span>' : '';
 const safeBadge = (s) => !s.safety ? '' : (!s.safety.ok ? '<span class="tag UNSAFE" title="'+(s.safety.hardFails||[]).join(', ')+'">RUG?</span>' : ((s.safety.warnings&&s.safety.warnings.length) ? '<span class="tag WARN" title="'+s.safety.warnings.join(', ')+'">⚠</span>' : '<span class="tag" style="color:var(--green)">✓</span>'));
 const momBadge = (s) => (s.momentum && s.momentum.confirmed) ? '<span class="tag" style="color:#f0b429" title="volume+momentum confirmed">🔥</span>' : '';
 const freshBadge = (s) => (s.freshPair && s.kind!=='ENTRY') ? '<span class="tag ENTRY" title="fresh pair">🌱</span>' : '';
-const repeatBadge = (s) => (s.repeatCount && s.repeatCount>1) ? '<span class="tag" style="color:#fff;background:#c0392b" title="'+s.repeatCount+' alerts on this token within '+(s.repeatWindowMinutes||35)+'m">🔁x'+s.repeatCount+'</span>' : '';
+const repeatBadge = (s) => { if(!(s.repeatCount && s.repeatCount>1)) return '';
+  const w=s.repeatWallets||s.repeatCount; const pc=(s.repeatPriceChangePct!=null)?' '+(s.repeatPriceChangePct>0?'+':'')+s.repeatPriceChangePct+'%':'';
+  const title=w+' distinct wallets · '+s.repeatCount+' alerts within '+(s.repeatWindowMinutes||35)+'m'+(s.repeatPriceChangePct!=null?' · '+(s.repeatPriceChangePct>0?'+':'')+s.repeatPriceChangePct+'% since last':'');
+  const label=s.repeatNewWallet?'🚨🪰 NEW HOLDER x'+w:'🔁x'+s.repeatCount;
+  const bg=s.repeatNewWallet?'#7a1fa2':'#c0392b';
+  return '<span class="tag" style="color:#fff;background:'+bg+'" title="'+title+'">'+label+pc+'</span>'; };
 
 function swarmRow(s){
   const d=document.createElement('div'); d.className='row flash';

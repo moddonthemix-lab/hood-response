@@ -112,15 +112,18 @@ describe('Aggregator', () => {
     expect(token?.discovered).toBe(true);
   });
 
-  it('emits a throttled solo-buy candidate for a single tracked-wallet buy', () => {
+  it('throttles a solo per (wallet, token) but lets a different wallet through', () => {
     const { agg, wallets, token } = ctx;
     const now = Date.now();
     const solo = agg.soloCandidate(swap(wallets[0]!, token, 'BUY', now));
     expect(solo).not.toBeNull();
     expect(solo!.kind).toBe('SOLO');
     expect(solo!.walletCount).toBe(1);
-    // Throttled: a second buy of the same token right away yields nothing.
-    expect(agg.soloCandidate(swap(wallets[1]!, token, 'BUY', now + 1000))).toBeNull();
+    // Same wallet buying the same token again right away is throttled.
+    expect(agg.soloCandidate(swap(wallets[0]!, token, 'BUY', now + 1000))).toBeNull();
+    // A DIFFERENT tracked wallet on the same token is NOT throttled — we must
+    // not let one busy wallet hide the others.
+    expect(agg.soloCandidate(swap(wallets[1]!, token, 'BUY', now + 1000))).not.toBeNull();
     // Sells never produce solo candidates.
     expect(agg.soloCandidate(swap(wallets[2]!, token, 'SELL', now))).toBeNull();
   });

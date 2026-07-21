@@ -106,9 +106,13 @@ export class Aggregator {
   soloCandidate(swap: SwapEvent): Swarm | null {
     if (!config.SOLO_ALERTS || swap.direction !== 'BUY') return null;
     if (!this.eligible(swap)) return null;
-    const last = this.lastSolo.get(swap.token) ?? 0;
+    // Throttle per (wallet, token), not per token, so a busy wallet re-buying is
+    // debounced but a DIFFERENT tracked wallet buying the same coin still
+    // produces its own solo candidate (the engine dedups/escalates from there).
+    const throttleKey = `${swap.wallet}:${swap.token}`;
+    const last = this.lastSolo.get(throttleKey) ?? 0;
     if (swap.timestamp - last < SOLO_THROTTLE_MS) return null;
-    this.lastSolo.set(swap.token, swap.timestamp);
+    this.lastSolo.set(throttleKey, swap.timestamp);
     return this.buildSwarm('SOLO', swap.token, [swap]);
   }
 
