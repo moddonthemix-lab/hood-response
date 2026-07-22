@@ -173,6 +173,33 @@ describe('Aggregator', () => {
     expect(agg.soloCandidate(swap(solo.address, token, 'BUY', now + 122_000))).not.toBeNull();
   });
 
+  it('suppresses blue-chip buys/sells only when the matching side is toggled off', () => {
+    const { store, token } = ctx; // token = CASHCAT, a seed/blue-chip coin
+    expect(store.isBlueChip(token)).toBe(true);
+    // A discovered coin is not a blue chip.
+    store.ensureToken('0xdiscovered000000000000000000000000000abc', 'NEWGEM');
+    expect(store.isBlueChip('0xdiscovered000000000000000000000000000abc')).toBe(false);
+
+    // Defaults on → nothing suppressed.
+    expect(store.blueChipSuppressed('BUY', token)).toBe(false);
+    expect(store.blueChipSuppressed('SELL', token)).toBe(false);
+
+    // Buys off → buy-side kinds suppressed, sell-side untouched.
+    store.blueChipBuys = false;
+    expect(store.blueChipSuppressed('BUY', token)).toBe(true);
+    expect(store.blueChipSuppressed('SOLO', token)).toBe(true);
+    expect(store.blueChipSuppressed('ENTRY', token)).toBe(true);
+    expect(store.blueChipSuppressed('SELL', token)).toBe(false);
+
+    // Sells off → sell-side kinds suppressed.
+    store.blueChipSells = false;
+    expect(store.blueChipSuppressed('SELL', token)).toBe(true);
+    expect(store.blueChipSuppressed('ROTATION', token)).toBe(true);
+
+    // A discovered (non-blue-chip) coin is never suppressed by this filter.
+    expect(store.blueChipSuppressed('BUY', '0xdiscovered000000000000000000000000000abc')).toBe(false);
+  });
+
   it('detects rotation when sellers of one token buy another', () => {
     const { store, agg, wallets } = ctx;
     const tokenA = store.tokensBySymbol.get('CASHCAT')!.address;

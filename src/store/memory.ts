@@ -54,6 +54,11 @@ export class MemoryStore extends EventEmitter {
   /** Coins (upper-case symbols) whose wallets are currently muted. Runtime-
    *  toggleable via the API; seeded from MUTE_WALLET_TOKENS. */
   readonly mutedTokens = new Set<string>();
+  /** Whether tracked-wallet BUYS / SELLS of blue-chip (seed) coins can alert.
+   *  Off = suppress whales just rotating money between coins we already track.
+   *  Runtime-toggleable via the API; seeded from BLUE_CHIP_BUYS/SELLS. */
+  blueChipBuys = config.BLUE_CHIP_BUYS;
+  blueChipSells = config.BLUE_CHIP_SELLS;
 
   private readonly swaps = new Ring<SwapEvent>(2000);
   private readonly swarms = new Ring<Swarm>(500);
@@ -105,6 +110,25 @@ export class MemoryStore extends EventEmitter {
     const w = this.wallets.get(wallet.toLowerCase());
     if (!w || w.holdsTokens.length === 0) return false;
     return w.holdsTokens.every((c) => this.mutedTokens.has(c.toUpperCase()));
+  }
+
+  /** A blue chip is a coin from the seed set (a tracked token that wasn't
+   *  auto-discovered) — the established coins we already follow. */
+  isBlueChip(tokenAddress: string): boolean {
+    const t = this.tokensByAddress.get(tokenAddress.toLowerCase());
+    return !!t && t.discovered !== true;
+  }
+
+  /** True when an alert should be suppressed because it's a blue-chip buy/sell
+   *  and that side is toggled off. Buy side = BUY/SOLO/ENTRY, sell side =
+   *  SELL/ROTATION. */
+  blueChipSuppressed(kind: string, tokenAddress: string): boolean {
+    if (!this.isBlueChip(tokenAddress)) return false;
+    const buySide = kind === 'BUY' || kind === 'SOLO' || kind === 'ENTRY';
+    const sellSide = kind === 'SELL' || kind === 'ROTATION';
+    if (buySide && !this.blueChipBuys) return true;
+    if (sellSide && !this.blueChipSells) return true;
+    return false;
   }
 
   /**
