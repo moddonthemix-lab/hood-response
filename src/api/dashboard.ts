@@ -85,6 +85,15 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .poscard-stat .stat-value { font-size:13px; margin-top:2px; }
   .poscard-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .poscard-actions { display:flex; gap:6px; margin-left:auto; }
+  .stat-block { border:1px solid var(--line); border-radius:8px; background:var(--panel2);
+    margin-bottom:14px; overflow:hidden; }
+  .stat-block:last-child { margin-bottom:0; }
+  .stat-block h3 { margin:0; padding:8px 12px; font-size:11px; text-transform:uppercase;
+    letter-spacing:.5px; color:var(--muted); border-bottom:1px solid var(--line); }
+  .stat-block .scroll { overflow-x:auto; }
+  .stat-block table { width:100%; min-width:520px; }
+  .wchip { display:inline-block; font-size:10px; padding:1px 6px; border-radius:4px;
+    background:#1b2530; color:var(--accent); margin:0 3px 2px 0; }
   @keyframes flash { from { background:#16324a; } to { background:transparent; } }
   @media (max-width:900px){ main{grid-template-columns:1fr;} .full{grid-column:1;} }
 </style>
@@ -534,17 +543,23 @@ async function unlockAdmin(){
   await loadFilters(); await loadMuted();
 }
 
+const fmtTokenAge=(h)=>{ if(h==null) return '?'; if(h<1) return Math.round(h*60)+'m'; if(h<48) return Math.round(h)+'h'; return Math.round(h/24)+'d'; };
 function perfRow(c){
-  const d=document.createElement('div'); d.className='row';
+  const d=document.createElement('div'); d.className='row'; d.style.flexWrap='wrap';
   const g=c.maxGainPct, now=c.lastGainPct; const gc=g>=50?'hi':g>=0?'mid':'lo';
   const tags='<span class="tag '+c.kind+'">'+c.kind+'</span>'+
     '<span class="tag" style="background:#12283a;color:var(--accent)" title="wallets in the alert">'+c.walletCount+'w</span>'+
     (c.repeatCount>1?'<span class="tag" style="background:'+(c.newHolder?'#7a1fa2':'#c0392b')+';color:#fff" title="repeat alerts">🔁x'+c.repeatCount+'</span>':'');
   const ageMin=Math.floor((Date.now()-c.entryAt)/60000); const age=ageMin<60?ageMin+'m':Math.floor(ageMin/60)+'h';
   d.innerHTML=tags+'<span class="sym">'+dexLink(c.token,c.tokenSymbol)+'</span>'+
-    '<span class="grow mono">'+usd(c.entryMarketCap)+' → '+usd(c.lastMarketCap||c.entryMarketCap)+' MC · '+age+' ago</span>'+
+    '<span class="grow mono">'+usd(c.entryMarketCap)+' → '+usd(c.lastMarketCap||c.entryMarketCap)+' MC · pair '+fmtTokenAge(c.pairAgeHours)+' old · alerted '+age+' ago</span>'+
     '<span class="conv '+gc+'" title="peak return since alert">▲ '+(g>=0?'+':'')+g+'%</span>'+
     '<span class="mono" title="current return">now '+(now>=0?'+':'')+now+'%</span>';
+  if(c.walletLabels&&c.walletLabels.length){
+    const chips=document.createElement('div'); chips.style.cssText='flex-basis:100%;padding-top:2px';
+    chips.innerHTML=c.walletLabels.map(w=>'<span class="wchip">'+w+'</span>').join('');
+    d.appendChild(chips);
+  }
   return d;
 }
 async function loadPerformance(){
@@ -561,11 +576,12 @@ async function loadPerformance(){
   }
 }
 
-function statsTable(title,buckets){
-  const rows=(buckets||[]).map(b=>'<tr><td>'+b.label+'</td><td class="num">'+b.count+'</td><td class="num">'+b.winRatePct+'%</td><td class="num">'+b.avgMaxGainPct+'%</td><td class="num">'+b.medianMaxGainPct+'%</td><td class="num">'+b.bestMaxGainPct+'%</td></tr>').join('');
-  return '<div style="min-width:280px;flex:1"><div class="mono" style="margin-bottom:6px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:11px">'+title+'</div>'+
+function statsTable(title,buckets,max){
+  const rows=(buckets||[]).slice(0,max||buckets.length)
+    .map(b=>'<tr><td>'+b.label+'</td><td class="num">'+b.count+'</td><td class="num">'+b.winRatePct+'%</td><td class="num">'+b.avgMaxGainPct+'%</td><td class="num">'+b.medianMaxGainPct+'%</td><td class="num">'+b.bestMaxGainPct+'%</td></tr>').join('');
+  return '<div class="stat-block"><h3>'+title+'</h3><div class="scroll">'+
     '<table><thead><tr><th>Bucket</th><th class="num">N</th><th class="num">Win%</th><th class="num">Avg pk</th><th class="num">Med pk</th><th class="num">Best</th></tr></thead><tbody>'+
-    (rows||'<tr><td colspan="6" class="empty">no data yet</td></tr>')+'</tbody></table></div>';
+    (rows||'<tr><td colspan="6" class="empty">no data yet</td></tr>')+'</tbody></table></div></div>';
 }
 async function loadPlays(){
   let d; try{ d=await fetch('/api/performance?limit=500').then(r=>r.json()); }catch(e){ return; }
@@ -573,13 +589,14 @@ async function loadPlays(){
   if(!d.enabled){ statsEl.innerHTML='<div class="empty">performance tracking off</div>'; $('plays-list').innerHTML=''; return; }
   const s=d.summary;
   if(s){
-    statsEl.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:20px">'+
+    statsEl.innerHTML=
+      statsTable('By kind',s.byKind)+
+      statsTable('By conviction band',s.byConviction)+
+      statsTable('By entry market cap',s.byMarketCap)+
+      statsTable('By token age at entry',s.byTokenAge)+
       statsTable('By wallet count',s.byWalletCount)+
       statsTable('By repeat',s.byRepeat)+
-      statsTable('By kind',s.byKind)+
-      statsTable('By conviction',s.byConviction)+
-      statsTable('By entry market cap',s.byMarketCap)+
-      '</div>';
+      statsTable('By wallet (top 25, N = calls that wallet was in)',s.byWallet,25);
     const resetNote=(d.resetsAt&&d.resetsAt.enabled)?(' · resets daily '+String(d.resetsAt.hour).padStart(2,'0')+':00 '+d.resetsAt.tz.split('/').pop().replace(/_/g,' ')):'';
     $('plays-note').textContent='— '+s.total+' calls tracked · win = peak ≥'+s.winThresholdPct+'%'+resetNote;
   }

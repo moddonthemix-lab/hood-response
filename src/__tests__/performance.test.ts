@@ -20,6 +20,7 @@ function swarm(over: Partial<Swarm> = {}): Swarm {
     walletCount: 3,
     wallets: [],
     walletSummary: '2 alpha · 1 beta',
+    walletLabels: [],
     totalUsd: 3000,
     marketCap: 60_000,
     newToken: false,
@@ -103,6 +104,31 @@ describe('PerformanceTracker', () => {
     const mc2mPlus = s.byMarketCap.find((b) => b.label === '2M+')!;
     expect(mcLt50k.count).toBe(1);
     expect(mc2mPlus.count).toBe(1);
+  });
+
+  it('summary buckets by wallet label (not mutually exclusive) and token age', () => {
+    const perf = new PerformanceTracker(stubPrice({ '0xa': 1, '0xb': 1 }));
+    perf.track(
+      swarm({ id: 'a', token: '0xa', walletLabels: ['tendies', 'hmm'], pairAgeHours: 0.5 }),
+    );
+    perf.track(swarm({ id: 'b', token: '0xb', walletLabels: ['tendies'], pairAgeHours: 30 }));
+
+    const s = perf.summary();
+    const tendies = s.byWallet.find((b) => b.label === 'tendies')!;
+    const hmm = s.byWallet.find((b) => b.label === 'hmm')!;
+    expect(tendies.count).toBe(2);
+    expect(hmm.count).toBe(1);
+    const under1h = s.byTokenAge.find((b) => b.label === '<1h')!;
+    const oneToSevenDays = s.byTokenAge.find((b) => b.label === '1-7d')!;
+    expect(under1h.count).toBe(1);
+    expect(oneToSevenDays.count).toBe(1);
+  });
+
+  it('buckets a call with no known pair age as "unknown"', () => {
+    const perf = new PerformanceTracker(stubPrice({ '0xa': 1 }));
+    perf.track(swarm({ id: 'a', token: '0xa', pairAgeHours: null }));
+    const unknown = perf.summary().byTokenAge.find((b) => b.label === 'unknown')!;
+    expect(unknown.count).toBe(1);
   });
 
   it('reset() clears every tracked call, open or closed', () => {

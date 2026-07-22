@@ -131,6 +131,10 @@ export interface Swarm {
   wallets: string[];
   /** Privacy-preserving makeup for display, e.g. "2 smart-money · 1 whale". */
   walletSummary: string;
+  /** Labels (operator-assigned nicknames — never addresses) of the tracked
+   *  wallets behind this specific alert, e.g. ["tendies", "hmm"]. Safe to
+   *  surface: identifies which named wallet called it without exposing PII. */
+  walletLabels: string[];
   totalUsd: number;
   /** Token market cap (USD) at the moment of the swarm — the cap the wallets
    *  bought or sold into. */
