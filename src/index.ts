@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   // can measure which signals produce runners (multi-wallet vs solo, repeat vs
   // single) from real outcomes.
   const performance = new PerformanceTracker(price);
+  await performance.load();
   performance.start();
   store.on('alert', (a) => {
     performance.track(a.swarm);
@@ -213,6 +214,7 @@ async function main(): Promise<void> {
     listener.stop();
     price.stop();
     performance.stop();
+    await performance.flush().catch(() => undefined);
     await app.close().catch(() => undefined);
     await detachPersistence();
     process.exit(0);
