@@ -153,6 +153,8 @@ const usd = (n) => n>=1e6 ? '$'+(n/1e6).toFixed(2)+'M' : n>=1e3 ? '$'+(n/1e3).to
 const convClass = (c) => c>=70?'hi':c>=40?'mid':'lo';
 const time = (t) => new Date(t).toLocaleTimeString();
 let DEX_CHAIN=null;
+let EXPLORER_BASE=null;
+const txLink=(h)=>h&&EXPLORER_BASE?'<a href="'+EXPLORER_BASE+'/tx/'+h+'" target="_blank" rel="noopener" class="dex">'+h.slice(0,8)+'…</a>':(h?h.slice(0,8)+'…':'');
 const dexUrl = (addr) => DEX_CHAIN ? 'https://dexscreener.com/'+DEX_CHAIN+'/'+addr : 'https://dexscreener.com/search?q='+addr;
 const dexLink = (addr,label) => '<a href="'+dexUrl(addr)+'" target="_blank" rel="noopener" class="dex">'+label+'</a>';
 const dexA = (url,label) => '<a href="'+(url||'#')+'" target="_blank" rel="noopener" class="dex">'+label+'</a>';
@@ -244,9 +246,10 @@ function snPosRow(p){
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
   const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
+  const tx=p.status==='closed'&&p.sellTx?('🔗 '+txLink(p.sellTx)):('🔗 '+txLink(p.buyTx));
   d.innerHTML=st+'<span class="tag" style="background:#12283a;color:var(--accent)">'+p.conviction+'</span>'+
     '<span class="sym">'+dexLink(p.token,p.tokenSymbol)+'</span>'+
-    '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC</span>'+
+    '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC · '+tx+'</span>'+
     '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
     '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell;
   return d;
@@ -357,7 +360,7 @@ async function showTab(name){
   $('tab-sniper').style.display = name==='sniper'?'':'none';
   if(name==='sniper'){
     if(!ADMIN_PW){ await unlockAdmin(); }
-    if(ADMIN_PW){ await loadSniper(true); if(!SNIPER_TIMER) SNIPER_TIMER=setInterval(()=>loadSniper(false),30000); }
+    if(ADMIN_PW){ await loadSniper(true); if(!SNIPER_TIMER) SNIPER_TIMER=setInterval(()=>loadSniper(false),8000); }
   }
 }
 
@@ -422,7 +425,7 @@ function applyStats(m){
 }
 
 async function boot(){
-  try{ const cfg=await fetch('/api/config').then(r=>r.json()); DEX_CHAIN=cfg.dexscreenerChain||null; }catch(e){}
+  try{ const cfg=await fetch('/api/config').then(r=>r.json()); DEX_CHAIN=cfg.dexscreenerChain||null; EXPLORER_BASE=cfg.explorerBase||null; }catch(e){}
   const stats=await fetch('/api/stats').then(r=>r.json());
   $('m-swaps').textContent=stats.totals.swaps;
   $('m-swarms').textContent=stats.totals.swarms;

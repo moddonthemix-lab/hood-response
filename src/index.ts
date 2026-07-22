@@ -234,6 +234,7 @@ async function main(): Promise<void> {
     performance.stop();
     sniper.stop();
     await performance.flush().catch(() => undefined);
+    await sniper.flush().catch(() => undefined);
     await app.close().catch(() => undefined);
     await detachPersistence();
     process.exit(0);
