@@ -2,7 +2,7 @@ import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { NotificationDelivery, Swarm } from '../types.js';
 import { headline, telegramHtml, textBody, usd } from './format.js';
-import { explorerUrl } from '../links.js';
+import { explorerUrl, sigmaBuyUrl, basedBuyUrl } from '../links.js';
 
 const TIMEOUT_MS = 4000;
 
@@ -47,6 +47,15 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
       },
       { name: 'Window', value: `${s.windowSeconds}s`, inline: true },
       { name: `Wallets (${s.walletCount})`, value: s.walletSummary, inline: true },
+      ...(s.athMarketCap != null
+        ? [
+            {
+              name: '🏔️ ATH MC',
+              value: `${usd(s.athMarketCap)}${s.athMarketCap > 0 && s.marketCap > 0 ? ` (${Math.round(((s.marketCap - s.athMarketCap) / s.athMarketCap) * 1000) / 10}%)` : ''}`,
+              inline: true,
+            },
+          ]
+        : []),
       ...(s.momentum?.volumeUsd != null
         ? [
             {
@@ -57,7 +66,16 @@ async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery>
           ]
         : []),
       ...(s.newToken ? [{ name: '🆕 Contract', value: s.token }] : []),
-      { name: 'Links', value: `[📊 Chart](${s.dexUrl}) · [🔎 Explorer](${explorerUrl(s.token)})`, inline: true },
+      {
+        name: 'Links',
+        value: [
+          `[📊 Chart](${s.dexUrl})`,
+          `[🔎 Explorer](${explorerUrl(s.token)})`,
+          ...(sigmaBuyUrl(s.token) ? [`[🎯 Buy SGM](${sigmaBuyUrl(s.token)})`] : []),
+          ...(basedBuyUrl(s.token) ? [`[🎲 Buy BSD](${basedBuyUrl(s.token)})`] : []),
+        ].join(' · '),
+        inline: true,
+      },
     ],
     footer: { text: 'Swarm the Fly · Robinhood Chain' },
     timestamp: new Date(s.lastSeen).toISOString(),

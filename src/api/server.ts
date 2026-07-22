@@ -116,6 +116,8 @@ export async function buildServer(
     persistence: { database: config.hasDatabase, redis: config.hasRedis },
     dexscreenerChain: config.DEXSCREENER_CHAIN || null,
     explorerBase: config.EXPLORER_BASE.replace(/\/$/, ''),
+    sigmaRef: config.SIGMA_REF || null,
+    basedRef: config.BASED_REF || null,
   }));
 
   // ── Tokens ──────────────────────────────────────────────────────────────────

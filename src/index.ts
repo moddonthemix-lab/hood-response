@@ -67,6 +67,7 @@ async function main(): Promise<void> {
       swarm.priceUsd = price.priceOf(swarm.token);
       swarm.liquidityUsd = price.liquidityOf(swarm.token);
       swarm.dex = price.dexIdOf(swarm.token);
+      swarm.athMarketCap = price.athMarketCapOf(swarm.token);
     }
     swarm.momentum = price.momentumOf(swarm.token) ?? undefined;
 

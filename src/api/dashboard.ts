@@ -157,15 +157,31 @@ const convClass = (c) => c>=70?'hi':c>=40?'mid':'lo';
 const time = (t) => new Date(t).toLocaleTimeString();
 let DEX_CHAIN=null;
 let EXPLORER_BASE=null;
+let SIGMA_REF=null;
+let BASED_REF=null;
 const txLink=(h)=>h&&EXPLORER_BASE?'<a href="'+EXPLORER_BASE+'/tx/'+h+'" target="_blank" rel="noopener" class="dex">'+h.slice(0,8)+'…</a>':(h?h.slice(0,8)+'…':'');
 const dexUrl = (addr) => DEX_CHAIN ? 'https://dexscreener.com/'+DEX_CHAIN+'/'+addr : 'https://dexscreener.com/search?q='+addr;
 const dexLink = (addr,label) => '<a href="'+dexUrl(addr)+'" target="_blank" rel="noopener" class="dex">'+label+'</a>';
 const dexA = (url,label) => '<a href="'+(url||'#')+'" target="_blank" rel="noopener" class="dex">'+label+'</a>';
+const sigmaUrl = (addr) => SIGMA_REF ? 'https://t.me/Sigma_buyBot?start=x'+SIGMA_REF+'-'+addr : null;
+const basedUrl = (addr) => BASED_REF ? 'https://t.me/based_eth_bot?start=r_'+BASED_REF+'_b_'+addr : null;
+const buyLinks = (addr) => {
+  const s=sigmaUrl(addr), b=basedUrl(addr); if(!s&&!b) return '';
+  return '<span class="grow" style="flex:0">'+
+    (s?'<a href="'+s+'" target="_blank" rel="noopener" class="dex" title="Buy on Sigma bot">🎯 SGM</a> ':'')+
+    (b?'<a href="'+b+'" target="_blank" rel="noopener" class="dex" title="Buy on Based bot">🎲 BSD</a>':'')+
+    '</span>';
+};
 
 function cap(el, max){ while(el.children.length>max) el.removeChild(el.lastChild); }
 function clearEmpty(el){ const e=el.querySelector('.empty'); if(e) e.remove(); }
 
-const mcLabel = (s) => (s.kind==='SELL' ? 'sold @ ' : 'bought @ ') + usd(s.marketCap) + ' MC' + (s.priceLive ? '' : ' (est)');
+const mcLabel = (s) => (s.kind==='SELL' ? 'sold @ ' : 'bought @ ') + usd(s.marketCap) + ' MC' + (s.priceLive ? '' : ' (est)') + athLabel(s);
+const athLabel = (s) => {
+  if(s.athMarketCap==null) return '';
+  const down = s.athMarketCap>0 && s.marketCap>0 ? Math.round(((s.marketCap-s.athMarketCap)/s.athMarketCap)*1000)/10 : null;
+  return ' · 🏔️ ATH '+usd(s.athMarketCap)+(down!=null?' ('+down+'%)':'');
+};
 
 function feedRow(s){
   const d=document.createElement('div'); d.className='row flash';
@@ -194,6 +210,7 @@ function swarmRow(s){
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+primeBadge(s)+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
+    buyLinks(s.token)+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
   return d;
@@ -204,6 +221,7 @@ function alertRow(a){
   d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+primeBadge(s)+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
+    buyLinks(s.token)+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
     '<span class="mono">'+time(a.createdAt)+'</span>';
   return d;
@@ -214,6 +232,7 @@ function newCoinRow(s){
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+'</span>'+
     '<span class="grow addr" title="'+s.token+'">'+dexA(s.dexUrl,s.token)+'</span>'+
     '<span class="mono">'+s.walletCount+'w · '+mcLabel(s)+'</span>'+
+    buyLinks(s.token)+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>';
   return d;
@@ -518,7 +537,7 @@ function applyStats(m){
 }
 
 async function boot(){
-  try{ const cfg=await fetch('/api/config').then(r=>r.json()); DEX_CHAIN=cfg.dexscreenerChain||null; EXPLORER_BASE=cfg.explorerBase||null; }catch(e){}
+  try{ const cfg=await fetch('/api/config').then(r=>r.json()); DEX_CHAIN=cfg.dexscreenerChain||null; EXPLORER_BASE=cfg.explorerBase||null; SIGMA_REF=cfg.sigmaRef||null; BASED_REF=cfg.basedRef||null; }catch(e){}
   const stats=await fetch('/api/stats').then(r=>r.json());
   $('m-swaps').textContent=stats.totals.swaps;
   $('m-swarms').textContent=stats.totals.swarms;

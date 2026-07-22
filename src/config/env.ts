@@ -204,6 +204,13 @@ const schema = z.object({
   PRICE_REFRESH_MS: num(15000),
   // Block explorer base for Explorer links in alerts (Robinhood Chain Blockscout).
   EXPLORER_BASE: z.string().default('https://robinhoodchain.blockscout.com'),
+
+  // One-tap buy links for Telegram trading bots, deep-linked with the token
+  // contract so tapping the button opens the bot with the swap pre-filled.
+  // Each ref is the operator's own referral id with that bot; blank disables
+  // the button for that bot.
+  SIGMA_REF: z.string().default('450463357'),
+  BASED_REF: z.string().default('Rick'),
 });
 
 const parsed = schema.safeParse(process.env);

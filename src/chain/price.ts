@@ -74,6 +74,10 @@ export class PriceOracle {
   private readonly live = new Map<string, LivePrice>();
   private readonly queue = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
+  /** Highest market cap seen for each token since this process started
+   *  tracking it (not a true lifetime ATH — DexScreener doesn't expose one —
+   *  but the best signal available without a paid data source). */
+  private readonly athMarketCap = new Map<string, number>();
 
   constructor(
     tokens: readonly TrackedToken[],
@@ -148,6 +152,12 @@ export class PriceOracle {
   /** Pair creation time (unix ms) for the token, or null if unknown. */
   pairCreatedAt(tokenAddress: string): number | null {
     return this.fresh(tokenAddress)?.pairCreatedAt ?? null;
+  }
+
+  /** Highest market cap seen for this token since tracking began, or null if
+   *  it has never had a live price. Always >= the current market cap. */
+  athMarketCapOf(tokenAddress: string): number | null {
+    return this.athMarketCap.get(tokenAddress.toLowerCase()) ?? null;
   }
 
   /** Volume/momentum confirmation for the token, or null if no live pair. */
@@ -269,10 +279,15 @@ export class PriceOracle {
       const priceUsd = Number(best.priceUsd);
       if (!Number.isFinite(priceUsd) || priceUsd <= 0) return;
       const priceNative = Number(best.priceNative);
+      const marketCap = best.marketCap ?? best.fdv ?? 0;
+      if (marketCap > (this.athMarketCap.get(address) ?? 0)) {
+        this.athMarketCap.set(address, marketCap);
+        capMap(this.athMarketCap, MAX_CACHE);
+      }
       this.live.set(address, {
         priceUsd,
         priceNative: Number.isFinite(priceNative) && priceNative > 0 ? priceNative : null,
-        marketCap: best.marketCap ?? best.fdv ?? 0,
+        marketCap,
         liquidityUsd: best.liquidity?.usd ?? null,
         pairCreatedAt: best.pairCreatedAt ?? null,
         volume24: best.volume?.h24 ?? null,
