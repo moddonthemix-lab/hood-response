@@ -331,17 +331,15 @@ export class SniperEngine {
     // Value the holding from the trusted market price (tokens × USD price ÷ ETH
     // USD price) rather than the raw on-chain swap quote — a thin/odd v4 route
     // can quote near-zero even when the token has a real, priced market value.
+    // ETH's own USD rate is derived from any live pair's priceUsd/priceNative
+    // ratio (see PriceOracle.ethUsdPrice) — DexScreener never returns a direct
+    // listing for WETH itself, since it's the quote side of virtually every
+    // pair here, never the base.
     let ethOut = onChainEthOut;
-    try {
-      const weth = config.SNIPER_WETH;
-      await this.price.refreshNow(weth).catch(() => undefined);
-      const ethUsd = this.price.isLive(weth) ? this.price.priceOf(weth) : 0;
-      if (ethUsd > 0) {
-        const marketEthValue = (tokens * px) / ethUsd;
-        if (marketEthValue > onChainEthOut) ethOut = marketEthValue;
-      }
-    } catch {
-      /* fall back to the on-chain quote */
+    const ethUsd = this.price.ethUsdPrice();
+    if (ethUsd && ethUsd > 0) {
+      const marketEthValue = (tokens * px) / ethUsd;
+      if (marketEthValue > onChainEthOut) ethOut = marketEthValue;
     }
     const now = Date.now();
     const pos: Position = {
