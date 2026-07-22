@@ -7,6 +7,11 @@ import { computeMomentum } from './momentum.js';
 
 interface LivePrice {
   priceUsd: number;
+  /** Price in the pair's quote currency (almost always WETH here) — lets us
+   *  derive an ETH/USD rate from ANY live pair (priceUsd / priceNative), since
+   *  DexScreener won't return a direct listing for WETH itself (it's the quote
+   *  side of virtually every pair, never the base). */
+  priceNative: number | null;
   marketCap: number;
   liquidityUsd: number | null;
   pairCreatedAt: number | null;
@@ -27,6 +32,7 @@ interface DexPair {
   pairAddress?: string;
   baseToken?: { address?: string; symbol?: string };
   priceUsd?: string;
+  priceNative?: string;
   marketCap?: number;
   fdv?: number;
   liquidity?: { usd?: number };
@@ -162,6 +168,24 @@ export class PriceOracle {
     return this.fresh(tokenAddress)?.dexId ?? null;
   }
 
+  /**
+   * Native-token (ETH/WETH) USD price, derived from ANY currently-live pair as
+   * priceUsd / priceNative — since a token's own priceUsd is already priced
+   * against its quote currency (WETH here), that ratio IS the ETH/USD rate.
+   * DexScreener never returns a direct "WETH" listing (WETH is the quote side
+   * of virtually every pair, never the base), so this is the reliable source.
+   * Returns null only if no live pair has been fetched yet.
+   */
+  ethUsdPrice(): number | null {
+    let best: { rate: number; fetchedAt: number } | null = null;
+    for (const l of this.live.values()) {
+      if (!l.priceNative || l.priceNative <= 0) continue;
+      const rate = l.priceUsd / l.priceNative;
+      if (!best || l.fetchedAt > best.fetchedAt) best = { rate, fetchedAt: l.fetchedAt };
+    }
+    return best?.rate ?? null;
+  }
+
   /** DexScreener pair identifier for the token's best pair, or null. On
    *  Uniswap v4 chains this is the 32-byte POOL ID — the sniper uses it to
    *  resolve the exact on-chain PoolKey instead of guessing pool params. */
@@ -244,8 +268,10 @@ export class PriceOracle {
 
       const priceUsd = Number(best.priceUsd);
       if (!Number.isFinite(priceUsd) || priceUsd <= 0) return;
+      const priceNative = Number(best.priceNative);
       this.live.set(address, {
         priceUsd,
+        priceNative: Number.isFinite(priceNative) && priceNative > 0 ? priceNative : null,
         marketCap: best.marketCap ?? best.fdv ?? 0,
         liquidityUsd: best.liquidity?.usd ?? null,
         pairCreatedAt: best.pairCreatedAt ?? null,

@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { SniperEngine, MIN_BUY_ETH } from '../sniper/engine.js';
-import { config } from '../config/env.js';
 import type { SwapExecutor } from '../sniper/executor.js';
 import type { Swarm } from '../types.js';
 
-function stubPrice(prices: Record<string, number>) {
+function stubPrice(prices: Record<string, number>, ethUsd: number | null = null) {
   return {
     async refreshNow() {},
     priceOf: (a: string) => prices[a] ?? 0,
     isLive: (a: string) => (prices[a] ?? 0) > 0,
     pairIdOf: () => null,
+    ethUsdPrice: () => ethUsd,
   } as unknown as import('../chain/price.js').PriceOracle;
 }
 
@@ -144,11 +144,8 @@ describe('SniperEngine', () => {
   it('imports a wallet holding with the real symbol, MC, and a market-priced ETH value', async () => {
     // On-chain quote returns ~0 (thin/odd route) but the market price is real —
     // ethIn should come from tokens*price/ETHprice, not the flaky quote.
-    const prices: Record<string, number> = {
-      '0xheld': 0.001, // token USD price
-      [config.SNIPER_WETH]: 2000, // ETH USD price
-    };
-    const eng = new SniperEngine(stubPrice(prices), stubExecutor([], {
+    const prices: Record<string, number> = { '0xheld': 0.001 }; // token USD price
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([], {
       valueInEth: async () => ({ tokens: 1000, ethOut: 0 }), // flaky on-chain quote
       tokenMeta: async () => ({ symbol: 'IMAGINE', totalSupply: 1_000_000 }),
     }));
@@ -160,8 +157,8 @@ describe('SniperEngine', () => {
   });
 
   it('re-importing an already-tracked token replaces the stale record', async () => {
-    const prices: Record<string, number> = { '0xheld': 0.001, [config.SNIPER_WETH]: 2000 };
-    const eng = new SniperEngine(stubPrice(prices), stubExecutor([]));
+    const prices: Record<string, number> = { '0xheld': 0.001 };
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([]));
     const first = await eng.importPosition('0xheld');
     const second = await eng.importPosition('0xheld');
     expect(second.id).not.toBe(first.id);
