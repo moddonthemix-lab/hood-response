@@ -262,6 +262,18 @@ export async function buildServer(
       return reply.code(400).send({ error: 'invalid private key' });
     }
   });
+  // Manual "sell now" for an open position (before take-profit is reached).
+  app.post('/api/sniper/sell/:id', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const id = (req.params as { id: string }).id;
+    try {
+      const pos = await sniper.sellNow(id);
+      return { ok: true, position: pos };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
+    }
+  });
   // One controlled test buy to validate the router before trusting auto-fire.
   app.post('/api/sniper/test-buy', async (req, reply) => {
     if (!adminOk(req)) return denyAdmin(reply);
