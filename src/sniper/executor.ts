@@ -393,6 +393,25 @@ export class SwapExecutor {
     return { txHash: tx.hash, tokensReceived, ethSpent: ethAmount };
   }
 
+  /** Current sellable value of the wallet's balance of `token`, in ETH, plus
+   *  the human token balance — used to recover/import an existing holding. */
+  async valueInEth(token: string, poolIdHint?: string | null): Promise<{ tokens: number; ethOut: number }> {
+    this.init();
+    if (!this.wallet) throw new Error('sniper wallet not configured');
+    const pool = await this.resolvePool(token, poolIdHint);
+    const token20 = new Contract(token, ERC20_ABI, this.wallet);
+    const bal = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
+    if (bal <= 0n) throw new Error('wallet holds none of this token');
+    const decimals = Number((await token20.getFunction('decimals')()) as bigint);
+    let out = 0n;
+    try {
+      out = await this.quoteOut(pool, bal, false);
+    } catch (err) {
+      throw new Error(`quote failed (${shortErr(err)})`);
+    }
+    return { tokens: Number(formatUnits(bal, decimals)), ethOut: Number(formatEther(out)) };
+  }
+
   /** Ensure Permit2's two-leg allowance so the router can pull the token. */
   private async ensurePermit2(token: string, amount: bigint): Promise<void> {
     if (!this.wallet) return;

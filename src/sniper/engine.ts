@@ -279,6 +279,37 @@ export class SniperEngine {
     return pos;
   }
 
+  /** Recover/import a holding the wallet already has (e.g. a position lost to a
+   *  redeploy, or a manual buy) so it shows up and can be sold / TP-managed.
+   *  ethIn is set to the current sellable value, so PnL tracks from import. */
+  async importPosition(token: string): Promise<Position> {
+    if (!this.executor.ready) throw new Error('wallet not connected');
+    if (this.holdsOpen(token)) throw new Error('already tracking this token');
+    const { tokens, ethOut } = await this.executor.valueInEth(token, this.price.pairIdOf(token));
+    const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
+    const now = Date.now();
+    const pos: Position = {
+      id: randomUUID(),
+      token,
+      tokenSymbol: 'HOLD-' + token.slice(2, 8).toUpperCase(),
+      kind: 'IMPORT',
+      conviction: 0,
+      ethIn: Math.round(ethOut * 1e6) / 1e6,
+      entryPriceUsd: px > 0 ? px : 0,
+      entryMarketCap: 0,
+      tokensReceived: tokens,
+      buyTx: 'imported',
+      openedAt: now,
+      lastPriceUsd: px > 0 ? px : 0,
+      updatedAt: now,
+      status: 'open',
+    };
+    this.positions.set(pos.id, pos);
+    void this.persist();
+    logger.info({ token, tokens, ethOut }, 'sniper: imported position');
+    return pos;
+  }
+
   updateSettings(patch: Partial<SniperSettings>): SniperSettings {
     if (typeof patch.enabled === 'boolean') this.settings.enabled = patch.enabled;
     if (typeof patch.minConviction === 'number') this.settings.minConviction = clamp(patch.minConviction, 0, 100);

@@ -275,6 +275,20 @@ export async function buildServer(
       return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
     }
   });
+  // Recover/import a holding the wallet already has (e.g. a position lost to a
+  // redeploy) so it can be sold or TP-managed in the bot.
+  app.post('/api/sniper/import', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const b = req.body as { token?: string } | undefined;
+    if (!b?.token || !ADDR.test(b.token)) return reply.code(400).send({ error: 'valid token address required' });
+    try {
+      const pos = await sniper.importPosition(b.token.toLowerCase());
+      return { ok: true, position: pos };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
+    }
+  });
   // One controlled test buy to validate the router before trusting auto-fire.
   app.post('/api/sniper/test-buy', async (req, reply) => {
     if (!adminOk(req)) return denyAdmin(reply);
