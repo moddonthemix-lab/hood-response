@@ -284,7 +284,8 @@ function renderSniperPanel(d){
       '<span id="sn-saved" class="mono" style="margin:0 0 16px 12px"></span>'+
     '</div>'+
     '<div class="mono">per-trade cap '+d.caps.perTradeEth+' Ξ · daily cap '+d.caps.dailyEth+' Ξ · spent 24h '+d.caps.spentTodayEth+' Ξ</div>'+
-    testRow;
+    testRow+
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="mono" style="margin-bottom:6px">🧾 Why it did / didn\\'t buy (recent alerts):</div><div id="sn-decisions"><div class="empty">no alerts seen yet</div></div></div>';
 
   const saveSettings=async(vals,note)=>{
     const msg=$('sn-saved'); if(msg) msg.textContent='saving…';
@@ -322,6 +323,13 @@ function updateSniperDynamic(d){
   $('sniper-status').textContent=d.configured?(s.enabled?'— 🟢 armed':'— off'):'— not configured';
   const p=d.pnl||{}; const tot=p.totalPnlEth||0;
   $('sniper-pnl').textContent='— total PnL '+(tot>=0?'+':'')+tot+' Ξ · open '+(p.openValueEth||0)+' Ξ (in '+(p.investedEth||0)+') · realized '+(p.realizedPnlEth||0)+' Ξ';
+  const de=$('sn-decisions');
+  if(de){ const ds=d.decisions||[];
+    if(!ds.length){ de.innerHTML='<div class="empty">no alerts seen yet</div>'; }
+    else de.innerHTML=ds.slice(0,12).map(x=>{
+      const ok=x.action==='bought'; const col=ok?'var(--green)':'var(--muted)';
+      return '<div class="mono" style="padding:2px 0;color:'+col+'">'+(ok?'✅':'⏭️')+' '+x.tokenSymbol+' ('+x.kind+', conv '+x.conviction+') — '+x.reason+'</div>';
+    }).join(''); }
   const el=$('sniper-positions'); el.innerHTML='';
   const ps=d.positions||[];
   if(!ps.length){ el.innerHTML='<div class="empty">no positions yet — turn Sniper on and wait for a qualifying alert</div>'; }

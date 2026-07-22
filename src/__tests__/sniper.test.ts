@@ -88,6 +88,18 @@ describe('SniperEngine', () => {
     expect(log).toEqual(['buy:0xtok:0.0005']);
   });
 
+  it('records a decision + reason for every alert', async () => {
+    const eng = new SniperEngine(stubPrice({ '0xtok': 1 }), stubExecutor([]));
+    await eng.onAlert(swarm()); // disabled
+    eng.updateSettings({ enabled: true, minConviction: 60, maxConviction: 100 });
+    await eng.onAlert(swarm({ token: '0xa', conviction: 30 })); // below band
+    await eng.onAlert(swarm({ token: '0xtok', conviction: 75 })); // bought
+    const d = (await eng.snapshot()).decisions;
+    expect(d[0]!.action).toBe('bought'); // newest first
+    expect(d.some((x) => x.reason === 'sniper is OFF')).toBe(true);
+    expect(d.some((x) => x.reason.includes('outside 60-100'))).toBe(true);
+  });
+
   it('manual sell-now closes an open position', async () => {
     const log: string[] = [];
     const eng = new SniperEngine(stubPrice({ '0xtok': 1 }), stubExecutor(log));
