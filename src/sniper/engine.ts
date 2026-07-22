@@ -243,6 +243,15 @@ export class SniperEngine {
     return p;
   }
 
+  /** Stop tracking a position WITHOUT selling — for clearing a bad/duplicate
+   *  import (e.g. one recorded before a metadata fix). The wallet's tokens are
+   *  untouched; re-import to pick it back up correctly. */
+  untrack(id: string): boolean {
+    const ok = this.positions.delete(id);
+    if (ok) void this.persist();
+    return ok;
+  }
+
   /** Set the hot-wallet key at runtime (from the dashboard). Returns the derived
    *  address. Never persisted; lives in memory until restart. */
   setPrivateKey(pk: string): string {
@@ -281,26 +290,37 @@ export class SniperEngine {
 
   /** Recover/import a holding the wallet already has (e.g. a position lost to a
    *  redeploy, or a manual buy) so it shows up and can be sold / TP-managed.
+   *  Pulls the real symbol/supply from the token contract and forces a live
+   *  price fetch — without a real entryPriceUsd, PnL/take-profit can't work.
    *  ethIn is set to the current sellable value, so PnL tracks from import. */
   async importPosition(token: string): Promise<Position> {
     if (!this.executor.ready) throw new Error('wallet not connected');
     if (this.holdsOpen(token)) throw new Error('already tracking this token');
-    const { tokens, ethOut } = await this.executor.valueInEth(token, this.price.pairIdOf(token));
+    const [{ tokens, ethOut }, meta] = await Promise.all([
+      this.executor.valueInEth(token, this.price.pairIdOf(token)),
+      this.executor.tokenMeta(token).catch(() => ({ symbol: token.slice(0, 8), totalSupply: 0 })),
+    ]);
+    // Force a fresh price fetch — this token may never have been priced before
+    // (bought directly via the sniper, bypassing normal discovery).
+    await this.price.refreshNow(token).catch(() => undefined);
     const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
+    if (px <= 0) {
+      throw new Error('no live price available for this token yet — try again in a few seconds');
+    }
     const now = Date.now();
     const pos: Position = {
       id: randomUUID(),
       token,
-      tokenSymbol: 'HOLD-' + token.slice(2, 8).toUpperCase(),
+      tokenSymbol: meta.symbol,
       kind: 'IMPORT',
       conviction: 0,
-      ethIn: Math.round(ethOut * 1e6) / 1e6,
-      entryPriceUsd: px > 0 ? px : 0,
-      entryMarketCap: 0,
+      ethIn: Math.round(ethOut * 1e8) / 1e8,
+      entryPriceUsd: px,
+      entryMarketCap: Math.round(px * meta.totalSupply),
       tokensReceived: tokens,
       buyTx: 'imported',
       openedAt: now,
-      lastPriceUsd: px > 0 ? px : 0,
+      lastPriceUsd: px,
       updatedAt: now,
       status: 'open',
     };
