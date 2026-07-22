@@ -225,9 +225,16 @@ export class SniperEngine {
     const realizedPnlEth = closed.reduce((s, p) => s + p.pnlEth, 0);
     const investedEth = open.reduce((s, p) => s + p.ethIn, 0);
     const openValueEth = open.reduce((s, p) => s + p.valueEth, 0);
+    const walletEth = await this.executor.balanceEth();
     return {
       configured: this.executor.ready,
-      wallet: { address: this.executor.address(), balanceEth: await this.executor.balanceEth() },
+      wallet: { address: this.executor.address(), balanceEth: walletEth },
+      // Full account picture: free ETH in the wallet + value of open positions.
+      account: {
+        walletEth: walletEth == null ? null : round6(walletEth),
+        positionsEth: round6(openValueEth),
+        totalEth: walletEth == null ? null : round6(walletEth + openValueEth),
+      },
       settings: this.settings,
       minBuyEth: MIN_BUY_ETH,
       caps: { perTradeEth: config.SNIPER_MAX_ETH_PER_TRADE, dailyEth: config.SNIPER_DAILY_CAP_ETH, spentTodayEth: round6(this.spentLast24h(Date.now())) },
