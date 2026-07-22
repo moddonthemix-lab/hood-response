@@ -30,6 +30,8 @@ const STATE_VIEW = '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b';
 // PoolManager.Initialize(id, currency0, currency1, fee, tickSpacing, hooks, sqrtPriceX96, tick)
 // topics: [sig, id, currency0, currency1]; data: fee,tickSpacing,hooks,sqrtPriceX96,tick
 const INIT_TOPIC = '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438';
+// ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const BAGS_HOOK = '0x2380aBf72C17aABAb76480244759AC7E2932EEcC';
 const DYNAMIC_FEE = 0x800000;
 const ADDRESS_THIS = '0x0000000000000000000000000000000000000002'; // UR: the router itself
@@ -408,6 +410,47 @@ export class SwapExecutor {
       token20.getFunction('totalSupply')() as Promise<bigint>,
     ]);
     return { symbol, totalSupply: Number(formatUnits(supply, Number(decimals))) };
+  }
+
+  /**
+   * Read the REAL ETH spent and tokens received from an actual on-chain buy
+   * transaction — used to restore a position with its true cost basis instead
+   * of a re-valued guess. ethSpent comes straight from the tx's `value` field
+   * (the router receives ETH as msg.value); tokensReceived comes from the
+   * ERC-20 Transfer log paying the wallet, decoded with the token's decimals.
+   */
+  async readBuyTx(
+    token: string,
+    txHash: string,
+  ): Promise<{ ethSpent: number; tokensReceived: number; blockTimestamp: number }> {
+    this.init();
+    if (!this.wallet || !this.provider) throw new Error('sniper wallet not configured');
+    const tx = await this.provider.getTransaction(txHash);
+    if (!tx) throw new Error('transaction not found on this chain');
+    const receipt = await this.provider.getTransactionReceipt(txHash);
+    if (!receipt) throw new Error('transaction receipt not found');
+    if (receipt.status !== 1) throw new Error('transaction did not succeed on-chain');
+
+    const t = getAddress(token);
+    const walletTopic = zeroPadValue(this.wallet.address, 32).toLowerCase();
+    const tokenLog = receipt.logs.find(
+      (l) =>
+        l.address.toLowerCase() === t.toLowerCase() &&
+        l.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() &&
+        l.topics[2]?.toLowerCase() === walletTopic,
+    );
+    if (!tokenLog) throw new Error('no matching token transfer to this wallet found in that tx');
+
+    const decimals = Number(
+      (await new Contract(token, ERC20_ABI, this.wallet).getFunction('decimals')()) as bigint,
+    );
+    const rawAmount = BigInt(tokenLog.data);
+    const block = await this.provider.getBlock(receipt.blockNumber);
+    return {
+      ethSpent: Number(formatEther(tx.value)),
+      tokensReceived: Number(formatUnits(rawAmount, decimals)),
+      blockTimestamp: (block?.timestamp ?? Math.floor(Date.now() / 1000)) * 1000,
+    };
   }
 
   /** Current sellable value of the wallet's balance of `token`, in ETH, plus
