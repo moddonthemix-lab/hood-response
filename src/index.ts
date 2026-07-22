@@ -100,10 +100,20 @@ async function main(): Promise<void> {
     // Re-check the ignore list against the (possibly enriched) symbol so a
     // tokenised equity that arrived as a placeholder can't slip through.
     if (config.ignoreSymbols.has(swarm.tokenSymbol.toUpperCase())) return;
-    if (config.SAFETY_FILTER) {
+    // Blue-chip buy/sell filter: suppress tracked-wallet trades of the coins we
+    // already track when that side is toggled off (whales just moving money).
+    const blueChipSuppressed = store.blueChipSuppressed(swarm.kind, swarm.token);
+    if (config.SAFETY_FILTER && !blueChipSuppressed) {
       swarm.safety = await safety.check(swarm.token, price.liquidityOf(swarm.token));
     }
     store.recordSwarm(swarm);
+    if (blueChipSuppressed) {
+      logger.info(
+        { token: swarm.tokenSymbol, kind: swarm.kind },
+        'alert suppressed by blue-chip filter',
+      );
+      return;
+    }
     if (swarm.safety && !swarm.safety.ok) {
       logger.info(
         { token: swarm.tokenSymbol, fails: swarm.safety.hardFails },

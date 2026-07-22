@@ -110,13 +110,13 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   </section>
 
   <section class="card full">
-    <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
-    <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
+    <h2>Alert Filters <span class="mono">blue-chip = coins we already track (cashcat, pons, yolo, hmm…)</span></h2>
+    <div class="body" id="filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
   </section>
 
   <section class="card full">
-    <h2>Tracked Wallets <span class="mono" id="wallet-count"></span></h2>
-    <div class="body"><table id="wallets"><thead><tr><th>Tier</th><th>Label</th><th class="num">Rank</th><th class="num">Conf.</th><th class="num">Buys</th><th class="num">Sells</th></tr></thead><tbody></tbody></table></div>
+    <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
+    <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
   </section>
 </main>
 
@@ -188,21 +188,25 @@ function newCoinRow(s){
 }
 
 async function loadTables(){
-  const [tokens, wallets] = await Promise.all([
-    fetch('/api/leaderboard/tokens').then(r=>r.json()),
-    fetch('/api/wallets').then(r=>r.json()),
-  ]);
+  const tokens=await fetch('/api/leaderboard/tokens').then(r=>r.json());
   const tb=$('tokens').querySelector('tbody'); tb.innerHTML='';
   for(const t of tokens){ const tr=document.createElement('tr');
     tr.innerHTML='<td class="sym">'+dexLink(t.address,(t.symbol||short(t.address)))+'</td><td class="num">'+t.buys+'</td><td class="num">'+t.sells+'</td><td class="num">'+t.swarms+'</td>';
     tb.appendChild(tr); }
   if(!tokens.length) tb.innerHTML='<tr><td colspan="4" class="empty">no activity yet</td></tr>';
+}
 
-  $('wallet-count').textContent=wallets.length+' tracked';
-  const wb=$('wallets').querySelector('tbody'); wb.innerHTML='';
-  for(const w of wallets){ const s=w.stats||{buys:0,sells:0}; const tr=document.createElement('tr');
-    tr.innerHTML='<td class="sym">'+(w.tier||'?')+'</td><td>'+w.label+'</td><td class="num">'+(w.rank||'')+'</td><td class="num">'+w.confidence.toFixed(2)+'</td><td class="num">'+(s.buys||0)+'</td><td class="num">'+(s.sells||0)+'</td>';
-    wb.appendChild(tr); }
+async function loadFilters(){
+  let f; try{ f=await fetch('/api/filters').then(r=>r.json()); }catch(e){ return; }
+  const el=$('filters'); el.innerHTML='';
+  const mk=(label,on,side)=>{ const b=document.createElement('button');
+    b.textContent=(on?'🟢 ':'⛔ ')+label+(on?' ON':' OFF');
+    b.title=on?'blue-chip '+side+' alert — click to mute':'blue-chip '+side+' muted — click to enable';
+    b.style.cssText='cursor:pointer;font:12px inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:'+(on?'#0d2a17':'#2b1113')+';color:'+(on?'var(--green)':'var(--red)');
+    b.onclick=async()=>{ b.disabled=true; await fetch('/api/bluechip/'+side,{method:'POST'}); await loadFilters(); };
+    return b; };
+  el.appendChild(mk('Blue-chip BUYS', f.blueChipBuys, 'buys'));
+  el.appendChild(mk('Blue-chip SELLS', f.blueChipSells, 'sells'));
 }
 
 function perfRow(c){
@@ -273,6 +277,7 @@ async function boot(){
   const ae=$('alerts'); if(alerts.length){ clearEmpty(ae); alerts.reverse().forEach(a=>ae.prepend(alertRow(a))); }
 
   await loadTables();
+  await loadFilters();
   await loadMuted();
   await loadPerformance();
   setInterval(loadTables, 8000);

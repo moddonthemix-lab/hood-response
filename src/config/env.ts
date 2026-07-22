@@ -134,6 +134,12 @@ const schema = z.object({
   // muted, so cross-conviction wallets that also hold other gems keep firing.
   // Comma-separated symbols, case-insensitive. Runtime-toggleable via /api/muted.
   MUTE_WALLET_TOKENS: z.string().default(''),
+  // Blue-chip = the coins we already track (the seed set: CASHCAT, PONS, YOLO,
+  // HMM, …). Toggle whether tracked-wallet BUYS / SELLS of those coins can
+  // alert. Off = weed out whales just rotating money between known coins, so
+  // alerts focus on new low-caps. Runtime-toggleable via /api/bluechip/*.
+  BLUE_CHIP_BUYS: bool(true),
+  BLUE_CHIP_SELLS: bool(true),
 
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),

@@ -169,6 +169,20 @@ export async function buildServer(
     return { muted, mutedWalletCount, groups };
   };
   app.get('/api/muted', async () => mutedState());
+
+  // ── Blue-chip buy/sell filter (weed out whales rotating known coins) ───────────
+  const filterState = () => ({ blueChipBuys: store.blueChipBuys, blueChipSells: store.blueChipSells });
+  app.get('/api/filters', async () => filterState());
+  app.post('/api/bluechip/buys', async () => {
+    store.blueChipBuys = !store.blueChipBuys;
+    logger.info({ blueChipBuys: store.blueChipBuys }, 'toggled blue-chip buys');
+    return filterState();
+  });
+  app.post('/api/bluechip/sells', async () => {
+    store.blueChipSells = !store.blueChipSells;
+    logger.info({ blueChipSells: store.blueChipSells }, 'toggled blue-chip sells');
+    return filterState();
+  });
   app.post('/api/muted/:symbol', async (req) => {
     const sym = (req.params as { symbol: string }).symbol.toUpperCase();
     store.mutedTokens.add(sym);
