@@ -290,10 +290,15 @@ function renderSniperPanel(d){
       ' <input id="sn-teth" type="number" step="0.0001" value="0.0005" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:90px">'+
       ' <button id="sn-test" class="snbtn" style="background:var(--panel2);color:#f0b429">Test buy</button>'+
       ' <span id="sn-test-out" class="mono"></span>'+
-      '<div class="mono" style="margin:12px 0 6px">🩹 Recover a holding the wallet has but the bot isn\\'t tracking (e.g. after a redeploy):</div>'+
+      '<div class="mono" style="margin:12px 0 6px">🩹 Recover a holding the wallet has but the bot isn\\'t tracking — VALUES AT CURRENT PRICE, not your real cost (e.g. after a redeploy):</div>'+
       '<input id="sn-imp" placeholder="token address 0x…" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:300px">'+
       ' <button id="sn-import" class="snbtn" style="background:var(--panel2);color:var(--green)">Import position</button>'+
       ' <span id="sn-imp-out" class="mono"></span>'+
+      '<div class="mono" style="margin:12px 0 6px">🎯 Restore from a REAL buy tx — reads the exact ETH spent + tokens received on-chain (accurate cost basis):</div>'+
+      '<input id="sn-rst-token" placeholder="token address 0x…" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:300px">'+
+      ' <input id="sn-rst-tx" placeholder="tx hash 0x…" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:300px">'+
+      ' <button id="sn-restore" class="snbtn" style="background:var(--panel2);color:var(--accent)">Restore from tx</button>'+
+      ' <span id="sn-rst-out" class="mono"></span>'+
     '</div>':'';
   panel.innerHTML=walletForm+
     '<div id="sn-acct" style="margin-bottom:12px"></div>'+
@@ -342,6 +347,15 @@ function renderSniperPanel(d){
     const r=await fetch('/api/sniper/import',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({token})});
     const j=await r.json();
     out.innerHTML = r.ok ? '✅ recovered '+j.position.tokensReceived.toFixed(2)+' tokens ('+j.position.ethIn+' Ξ)' : '❌ '+(j.error||'failed');
+    await loadSniper(false);
+  };
+  if($('sn-restore')) $('sn-restore').onclick=async()=>{
+    const token=$('sn-rst-token').value.trim(); const txHash=$('sn-rst-tx').value.trim(); const out=$('sn-rst-out');
+    if(!token||!txHash){ out.textContent='enter both the token and the tx hash'; return; }
+    out.textContent='reading tx…';
+    const r=await fetch('/api/sniper/restore',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({token,txHash})});
+    const j=await r.json();
+    out.innerHTML = r.ok ? '✅ restored — '+j.position.ethIn+' Ξ in, '+j.position.tokensReceived.toFixed(2)+' tokens (real cost basis)' : '❌ '+(j.error||'failed');
     await loadSniper(false);
   };
 }

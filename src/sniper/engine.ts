@@ -318,22 +318,26 @@ export class SniperEngine {
    *  Pulls the real symbol/supply from the token contract and forces a live
    *  price fetch — without a real entryPriceUsd, PnL/take-profit can't work.
    *  ethIn is set to the current sellable value, so PnL tracks from import. */
-  async importPosition(token: string): Promise<Position> {
-    if (!this.executor.ready) throw new Error('wallet not connected');
-    // Re-importing an already-tracked token replaces the old record — but ONLY
-    // when that record is itself a previous import (buyTx === 'imported').
-    // A REAL bought position (a genuine on-chain buyTx) is never silently
-    // replaced: that would erase the true cost basis and tx hash. Untrack it
-    // explicitly first if you really mean to re-value it as a fresh import.
+  /** Clear any existing OPEN record for `token` before creating a new one —
+   *  but only when that record is itself a previous import/restore (or the
+   *  exact same real tx being re-confirmed). A REAL bought position with a
+   *  DIFFERENT real tx is never silently replaced. */
+  private clearReplaceableRecord(token: string, incomingTx: string): void {
     for (const [id, p] of this.positions) {
       if (p.status !== 'open' || p.token.toLowerCase() !== token.toLowerCase()) continue;
-      if (p.buyTx !== 'imported') {
+      const isRealDifferentTx = p.buyTx !== 'imported' && p.buyTx.toLowerCase() !== incomingTx.toLowerCase();
+      if (isRealDifferentTx) {
         throw new Error(
-          `already tracking a REAL bought position for this token (tx ${p.buyTx.slice(0, 10)}…, ${p.ethIn} Ξ in) — Untrack it first if you really want to replace it with a fresh import`,
+          `already tracking a REAL bought position for this token (tx ${p.buyTx.slice(0, 10)}…, ${p.ethIn} Ξ in) — Untrack it first if you really want to replace it`,
         );
       }
       this.positions.delete(id);
     }
+  }
+
+  async importPosition(token: string): Promise<Position> {
+    if (!this.executor.ready) throw new Error('wallet not connected');
+    this.clearReplaceableRecord(token, 'imported');
     const [{ tokens, ethOut: onChainEthOut }, meta] = await Promise.all([
       this.executor.valueInEth(token, this.price.pairIdOf(token)),
       this.executor.tokenMeta(token),
@@ -378,6 +382,55 @@ export class SniperEngine {
     this.positions.set(pos.id, pos);
     void this.persist();
     logger.info({ token, tokens, ethOut }, 'sniper: imported position');
+    return pos;
+  }
+
+  /**
+   * Restore a position from a REAL buy transaction hash — reads the actual
+   * ETH spent and tokens received straight from the chain, so the entry data
+   * is exact (not a re-valued guess like importPosition). entryPriceUsd is
+   * derived from the real spend ratio (ethSpent×ETH-USD ÷ tokensReceived)
+   * using the current ETH/USD rate as the best available approximation, which
+   * gives an accurate PnL baseline immediately instead of starting at +0%.
+   */
+  async restoreFromTx(token: string, txHash: string): Promise<Position> {
+    if (!this.executor.ready) throw new Error('wallet not connected');
+    this.clearReplaceableRecord(token, txHash);
+    const [{ ethSpent, tokensReceived, blockTimestamp }, meta] = await Promise.all([
+      this.executor.readBuyTx(token, txHash),
+      this.executor.tokenMeta(token),
+    ]);
+    await this.price.refreshNow(token).catch(() => undefined);
+    const currentPx = this.price.isLive(token) ? this.price.priceOf(token) : 0;
+    const ethUsd = this.price.ethUsdPrice();
+    let entryPriceUsd = 0;
+    if (ethUsd && ethUsd > 0 && tokensReceived > 0) {
+      entryPriceUsd = (ethSpent * ethUsd) / tokensReceived; // real cost basis
+    } else if (currentPx > 0) {
+      entryPriceUsd = currentPx; // no ETH/USD rate yet — fall back, PnL starts at 0%
+    } else {
+      throw new Error('no price data available yet to value this position — try again in a few seconds');
+    }
+    const now = Date.now();
+    const pos: Position = {
+      id: randomUUID(),
+      token,
+      tokenSymbol: meta.symbol,
+      kind: 'BUY',
+      conviction: 0,
+      ethIn: Math.round(ethSpent * 1e8) / 1e8,
+      entryPriceUsd,
+      entryMarketCap: Math.round(entryPriceUsd * meta.totalSupply),
+      tokensReceived,
+      buyTx: txHash,
+      openedAt: blockTimestamp,
+      lastPriceUsd: currentPx > 0 ? currentPx : entryPriceUsd,
+      updatedAt: now,
+      status: 'open',
+    };
+    this.positions.set(pos.id, pos);
+    void this.persist();
+    logger.info({ token, txHash, ethSpent, tokensReceived }, 'sniper: restored position from real tx');
     return pos;
   }
 

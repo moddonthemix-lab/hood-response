@@ -18,6 +18,10 @@ function stubExecutor(
   overrides: Partial<{
     valueInEth: (token: string) => Promise<{ tokens: number; ethOut: number }>;
     tokenMeta: (token: string) => Promise<{ symbol: string; totalSupply: number }>;
+    readBuyTx: (
+      token: string,
+      txHash: string,
+    ) => Promise<{ ethSpent: number; tokensReceived: number; blockTimestamp: number }>;
   }> = {},
 ) {
   return {
@@ -36,6 +40,9 @@ function stubExecutor(
     },
     valueInEth: overrides.valueInEth ?? (async () => ({ tokens: 1000, ethOut: 0.001 })),
     tokenMeta: overrides.tokenMeta ?? (async () => ({ symbol: 'REAL', totalSupply: 1_000_000 })),
+    readBuyTx:
+      overrides.readBuyTx ??
+      (async () => ({ ethSpent: 0.0008, tokensReceived: 13583.78, blockTimestamp: 1_700_000_000_000 })),
   } as unknown as SwapExecutor;
 }
 
@@ -183,6 +190,39 @@ describe('SniperEngine', () => {
     const snap = await eng.snapshot();
     expect(snap.removedLog).toHaveLength(1);
     expect(snap.removedLog[0]!.buyTx).toBe('0xbuy');
+  });
+
+  it('restores a position from a real tx with the EXACT on-chain amounts', async () => {
+    const prices: Record<string, number> = { '0xheld': 0.0001 };
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([], {
+      readBuyTx: async () => ({ ethSpent: 0.0008, tokensReceived: 13583.78, blockTimestamp: 1_700_000_000_000 }),
+      tokenMeta: async () => ({ symbol: 'IMAGINE', totalSupply: 1_000_000_000 }),
+    }));
+    const pos = await eng.restoreFromTx('0xheld', '0xreal51238fe9');
+    expect(pos.tokenSymbol).toBe('IMAGINE');
+    expect(pos.ethIn).toBeCloseTo(0.0008, 8); // the EXACT real spend, not a re-valued guess
+    expect(pos.tokensReceived).toBeCloseTo(13583.78, 2);
+    expect(pos.buyTx).toBe('0xreal51238fe9');
+    expect(pos.openedAt).toBe(1_700_000_000_000); // the real block time, not "now"
+    // entryPriceUsd derived from the real spend ratio: 0.0008*2000/13583.78
+    expect(pos.entryPriceUsd).toBeCloseTo((0.0008 * 2000) / 13583.78, 8);
+  });
+
+  it('restoring the SAME tx again updates the record instead of throwing', async () => {
+    const prices: Record<string, number> = { '0xheld': 0.0001 };
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([]));
+    const first = await eng.restoreFromTx('0xheld', '0xsametx');
+    const second = await eng.restoreFromTx('0xheld', '0xsametx');
+    expect(second.id).not.toBe(first.id); // re-confirmed as a fresh record
+    const snap = await eng.snapshot();
+    expect(snap.positions.filter((p) => p.status === 'open')).toHaveLength(1);
+  });
+
+  it('restoring with a DIFFERENT real tx than an existing real position is refused', async () => {
+    const prices: Record<string, number> = { '0xheld': 0.0001 };
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([]));
+    await eng.restoreFromTx('0xheld', '0xfirsttx');
+    await expect(eng.restoreFromTx('0xheld', '0xdifferenttx')).rejects.toThrow(/REAL bought position/);
   });
 
   it('per-position take-profit overrides the global setting', async () => {

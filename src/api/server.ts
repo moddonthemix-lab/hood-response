@@ -315,6 +315,23 @@ export async function buildServer(
       return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
     }
   });
+  // Restore a position from a REAL buy tx hash — reads the actual ETH spent
+  // and tokens received on-chain, so the entry data is exact (not re-valued).
+  app.post('/api/sniper/restore', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const b = req.body as { token?: string; txHash?: string } | undefined;
+    if (!b?.token || !ADDR.test(b.token)) return reply.code(400).send({ error: 'valid token address required' });
+    if (!b?.txHash || !/^0x[0-9a-fA-F]{64}$/.test(b.txHash)) {
+      return reply.code(400).send({ error: 'valid 32-byte tx hash required' });
+    }
+    try {
+      const pos = await sniper.restoreFromTx(b.token.toLowerCase(), b.txHash);
+      return { ok: true, position: pos };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
+    }
+  });
   // One controlled test buy to validate the router before trusting auto-fire.
   app.post('/api/sniper/test-buy', async (req, reply) => {
     if (!adminOk(req)) return denyAdmin(reply);
