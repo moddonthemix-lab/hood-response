@@ -34,8 +34,10 @@ const ACT_SETTLE_ALL = '0c';
 const ACT_TAKE_ALL = '0f';
 
 const ROUTER_ABI = ['function execute(bytes commands, bytes[] inputs, uint256 deadline) payable'];
+// V4Quoter.quoteExactInputSingle takes ONE struct arg:
+//   QuoteExactSingleParams { PoolKey poolKey; bool zeroForOne; uint128 exactAmount; bytes hookData }
 const QUOTER_ABI = [
-  'function quoteExactInputSingle((address,address,uint24,int24,address) poolKey, bool zeroForOne, uint128 exactAmount, bytes hookData) returns (uint256 amountOut, uint256 gasEstimate)',
+  'function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes) params) returns (uint256 amountOut, uint256 gasEstimate)',
 ];
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -60,6 +62,12 @@ export interface SellResult {
 }
 
 const abi = AbiCoder.defaultAbiCoder();
+
+/** Trim an ethers/RPC error down to a short, human reason for the decision log. */
+function shortErr(err: unknown): string {
+  const e = err as { shortMessage?: string; reason?: string; message?: string };
+  return (e.shortMessage || e.reason || e.message || String(err)).slice(0, 90);
+}
 
 /** currency0/currency1 are the sorted (token, WETH) pair. */
 function poolKey(token: string): { currency0: string; currency1: string; wethIsCurrency0: boolean } {
@@ -123,20 +131,25 @@ export class SwapExecutor {
     }
   }
 
+  /** Quote token-out for an exact amount-in on the token/WETH pool. Throws with
+   *  the underlying revert reason so callers can surface why routing failed. */
+  private async quoteOut(token: string, amountIn: bigint, zeroForOne: boolean): Promise<bigint> {
+    const quoter = new Contract(V4_QUOTER, QUOTER_ABI, this.wallet!);
+    const pk = poolKey(token);
+    const key = [pk.currency0, pk.currency1, POOL_FEE, TICK_SPACING, HOOK];
+    const fn = (quoter.getFunction('quoteExactInputSingle') as unknown as {
+      staticCall: (params: unknown) => Promise<[bigint, bigint]>;
+    }).staticCall;
+    const [amountOut] = await fn([key, zeroForOne, amountIn, '0x']);
+    return amountOut;
+  }
+
   /** Read-only route check: expected token out for `ethAmount` in, or null. */
   async quoteBuy(token: string, ethAmount: number): Promise<bigint | null> {
     this.init();
     if (!this.wallet) return null;
     try {
-      const quoter = new Contract(V4_QUOTER, QUOTER_ABI, this.wallet);
-      const pk = poolKey(token);
-      const key = [pk.currency0, pk.currency1, POOL_FEE, TICK_SPACING, HOOK];
-      const zeroForOne = pk.wethIsCurrency0; // WETH in
-      const fn = (quoter.getFunction('quoteExactInputSingle') as unknown as {
-        staticCall: (k: unknown, z: boolean, a: bigint, h: string) => Promise<[bigint, bigint]>;
-      }).staticCall;
-      const [amountOut] = await fn(key, zeroForOne, parseEther(ethAmount.toString()), '0x');
-      return amountOut;
+      return await this.quoteOut(token, parseEther(ethAmount.toString()), poolKey(token).wethIsCurrency0);
     } catch (err) {
       logger.warn({ token, err: String(err) }, 'sniper: quote failed (routing unavailable)');
       return null;
@@ -161,12 +174,16 @@ export class SwapExecutor {
     this.init();
     if (!this.wallet) throw new Error('sniper wallet not configured');
     const amountIn = parseEther(ethAmount.toString());
-    const quoted = await this.quoteBuy(token, ethAmount);
-    if (quoted == null || quoted <= 0n) throw new Error('no route / quote unavailable');
-    const amountOutMin = this.minOut(quoted);
-
     const pk = poolKey(token);
     const zeroForOne = pk.wethIsCurrency0; // WETH → token
+    let quoted: bigint;
+    try {
+      quoted = await this.quoteOut(token, amountIn, zeroForOne);
+    } catch (err) {
+      throw new Error(`quote reverted (${shortErr(err)}) — token may not have a WETH v4 pool`);
+    }
+    if (quoted <= 0n) throw new Error('no route (zero quote)');
+    const amountOutMin = this.minOut(quoted);
     const weth = getAddress(config.SNIPER_WETH);
 
     // v4 actions: swap, settle WETH (input), take token (output).
@@ -235,18 +252,13 @@ export class SwapExecutor {
     await this.ensurePermit2(token, bal);
 
     // Quote token → WETH out.
-    const quoter = new Contract(V4_QUOTER, QUOTER_ABI, this.wallet);
     const pk = poolKey(token);
-    const key = [pk.currency0, pk.currency1, POOL_FEE, TICK_SPACING, HOOK];
     const zeroForOne = !pk.wethIsCurrency0; // token → WETH
     let quotedOut = 0n;
     try {
-      const fn = (quoter.getFunction('quoteExactInputSingle') as unknown as {
-        staticCall: (k: unknown, z: boolean, a: bigint, h: string) => Promise<[bigint, bigint]>;
-      }).staticCall;
-      [quotedOut] = await fn(key, zeroForOne, bal, '0x');
+      quotedOut = await this.quoteOut(token, bal, zeroForOne);
     } catch (err) {
-      throw new Error(`no route / quote failed: ${String(err)}`);
+      throw new Error(`sell quote reverted (${shortErr(err)})`);
     }
     const amountOutMin = this.minOut(quotedOut);
     const weth = getAddress(config.SNIPER_WETH);
