@@ -186,22 +186,32 @@ export class SniperEngine {
     void this.persist();
   }
 
+  private async closePosition(p: Position, reason: 'take-profit' | 'manual'): Promise<void> {
+    const res = await this.executor.sell(p.token);
+    p.status = 'closed';
+    p.closedAt = Date.now();
+    p.sellTx = res.txHash;
+    p.exitPriceUsd = p.lastPriceUsd;
+    p.closeReason = reason;
+    logger.info({ token: p.tokenSymbol, tx: res.txHash, ethOut: res.ethReceived, reason }, 'sniper: position sold');
+    void this.persist();
+  }
+
   private async takeProfit(p: Position): Promise<void> {
     if (p.status !== 'open') return;
     try {
-      const res = await this.executor.sell(p.token);
-      p.status = 'closed';
-      p.closedAt = Date.now();
-      p.sellTx = res.txHash;
-      p.exitPriceUsd = p.lastPriceUsd;
-      p.closeReason = 'take-profit';
-      logger.info(
-        { token: p.tokenSymbol, tx: res.txHash, ethOut: res.ethReceived },
-        'sniper: took profit',
-      );
+      await this.closePosition(p, 'take-profit');
     } catch (err) {
       logger.error({ token: p.tokenSymbol, err: String(err) }, 'sniper: take-profit sell failed');
     }
+  }
+
+  /** Manual "sell now" for an open position (before take-profit is hit). */
+  async sellNow(id: string): Promise<Position> {
+    const p = this.positions.get(id);
+    if (!p || p.status !== 'open') throw new Error('position not open');
+    await this.closePosition(p, 'manual');
+    return p;
   }
 
   /** Set the hot-wallet key at runtime (from the dashboard). Returns the derived

@@ -243,11 +243,12 @@ function snPosRow(p){
   const d=document.createElement('div'); d.className='row';
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
+  const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
   d.innerHTML=st+'<span class="tag" style="background:#12283a;color:var(--accent)">'+p.conviction+'</span>'+
     '<span class="sym">'+dexLink(p.token,p.tokenSymbol)+'</span>'+
     '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC</span>'+
     '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
-    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>';
+    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell;
   return d;
 }
 async function loadSniper(){
@@ -316,6 +317,13 @@ async function loadSniper(){
   const ps=d.positions||[];
   if(!ps.length){ el.innerHTML='<div class="empty">no positions yet — turn Sniper on and wait for a qualifying alert</div>'; }
   else ps.forEach(pp=>el.appendChild(snPosRow(pp)));
+  el.querySelectorAll('.sn-sell').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Sell this position now?')) return;
+    b.disabled=true; b.textContent='selling…';
+    const r=await fetch('/api/sniper/sell/'+b.dataset.id,{method:'POST',headers:adminHeaders()});
+    if(!r.ok){ const j=await r.json().catch(()=>({})); alert('Sell failed: '+(j.error||'error')); }
+    await loadSniper();
+  });
 }
 
 let SNIPER_TIMER=null;

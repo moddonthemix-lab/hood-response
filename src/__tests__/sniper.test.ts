@@ -88,6 +88,19 @@ describe('SniperEngine', () => {
     expect(log).toEqual(['buy:0xtok:0.0005']);
   });
 
+  it('manual sell-now closes an open position', async () => {
+    const log: string[] = [];
+    const eng = new SniperEngine(stubPrice({ '0xtok': 1 }), stubExecutor(log));
+    eng.updateSettings({ enabled: true });
+    await eng.onAlert(swarm());
+    const id = (await eng.snapshot()).positions[0]!.id;
+    await eng.sellNow(id);
+    expect(log).toContain('sell:0xtok');
+    const snap = await eng.snapshot();
+    expect(snap.positions[0]!.status).toBe('closed');
+    expect(snap.positions[0]!.closeReason).toBe('manual');
+  });
+
   it('auto-sells at take-profit and books realized PnL', async () => {
     const log: string[] = [];
     const prices: Record<string, number> = { '0xtok': 1 };
