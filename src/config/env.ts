@@ -112,6 +112,10 @@ const schema = z.object({
   // A call counts as a "win" for the win-rate stat when its peak return reaches
   // this %. Tune to whatever "runner" means to you.
   PERF_WIN_THRESHOLD_PCT: num(50),
+  // Persist the outcome tracker to this file so redeploys don't wipe it. Point
+  // it at a mounted Railway Volume (e.g. /data/performance.json); empty = keep
+  // data in memory only (lost on restart).
+  PERF_STORE_PATH: z.string().default(''),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"

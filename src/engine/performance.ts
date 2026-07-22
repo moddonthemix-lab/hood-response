@@ -1,3 +1,5 @@
+import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { PriceOracle } from '../chain/price.js';
@@ -190,6 +192,48 @@ export class PerformanceTracker {
       if (c.gain24hPct == null && age >= 24 * 3_600_000) c.gain24hPct = c.lastGainPct;
       if (age >= trackMs) c.closed = true;
       c.updatedAt = now;
+    }
+    void this.persist();
+  }
+
+  /** Load a previously persisted snapshot so redeploys don't lose outcome data.
+   *  No-op unless PERF_STORE_PATH is set (point it at a Railway Volume). */
+  async load(): Promise<void> {
+    if (!config.PERFORMANCE_TRACKING || !config.PERF_STORE_PATH) return;
+    try {
+      const raw = await readFile(config.PERF_STORE_PATH, 'utf8');
+      const arr = JSON.parse(raw) as TrackedCall[];
+      for (const c of arr) if (c && c.id) this.calls.set(c.id, c);
+      logger.info({ loaded: this.calls.size, path: config.PERF_STORE_PATH }, 'performance: restored snapshot');
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== 'ENOENT') logger.warn({ err: String(err) }, 'performance: could not load snapshot');
+    }
+  }
+
+  /** Atomically write the current calls to disk (temp file + rename). */
+  async flush(): Promise<void> {
+    if (!config.PERFORMANCE_TRACKING || !config.PERF_STORE_PATH) return;
+    const path = config.PERF_STORE_PATH;
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      const tmp = `${path}.tmp`;
+      await writeFile(tmp, JSON.stringify([...this.calls.values()]));
+      await rename(tmp, path);
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'performance: could not save snapshot');
+    }
+  }
+
+  private persisting = false;
+  /** Debounced persist so overlapping samples don't race on the file. */
+  private async persist(): Promise<void> {
+    if (this.persisting) return;
+    this.persisting = true;
+    try {
+      await this.flush();
+    } finally {
+      this.persisting = false;
     }
   }
 
