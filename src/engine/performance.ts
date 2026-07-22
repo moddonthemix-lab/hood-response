@@ -200,6 +200,7 @@ export class PerformanceTracker {
    *  No-op unless PERF_STORE_PATH is set (point it at a Railway Volume). */
   async load(): Promise<void> {
     if (!config.PERFORMANCE_TRACKING || !config.PERF_STORE_PATH) return;
+    logger.info({ path: config.PERF_STORE_PATH }, 'performance: persistence enabled');
     try {
       const raw = await readFile(config.PERF_STORE_PATH, 'utf8');
       const arr = JSON.parse(raw) as TrackedCall[];
