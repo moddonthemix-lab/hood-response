@@ -255,7 +255,12 @@ async function loadSniper(){
   let d; try{ d=await fetch('/api/sniper',{headers:adminHeaders()}).then(r=>r.json()); }catch(e){ return; }
   const s=d.settings||{}; const w=d.wallet||{};
   const panel=$('sniper-panel');
-  const warn=d.configured?'':'<div style="color:var(--red);margin-bottom:10px">⚠️ Not configured — set SNIPER_PRIVATE_KEY, SNIPER_ROUTER and SNIPER_WETH in Railway to enable real buys.</div>';
+  const walletForm=d.configured?''
+    :'<div style="margin-bottom:12px;padding:10px;border:1px solid var(--line);border-radius:8px">'
+      +'<div style="color:var(--muted);margin-bottom:6px">🔑 Connect a burner wallet (key stays in memory, never saved):</div>'
+      +'<input id="sn-key" type="password" placeholder="private key (0x…)" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:320px">'
+      +' <button id="sn-connect" class="snbtn" style="background:var(--panel2);color:var(--green)">Connect</button>'
+      +'</div>';
   const onoff='<button id="sn-toggle" class="snbtn" style="background:'+(s.enabled?'#0d2a17':'#2b1113')+';color:'+(s.enabled?'var(--green)':'var(--red)')+'">'+(s.enabled?'🟢 SNIPER ON':'⛔ SNIPER OFF')+'</button>';
   const wallet=w.address?('wallet <code>'+short(w.address)+'</code>'):'no wallet';
   const acct=d.account||{};
@@ -264,7 +269,15 @@ async function loadSniper(){
     '<span>📈 Positions: '+(acct.positionsEth||0)+' Ξ</span>'+
     '<span>🧮 <b>Account total:</b> '+(acct.totalEth==null?'?':acct.totalEth)+' Ξ</span>'+
     '</div>';
-  panel.innerHTML=warn+acctLine+
+  const testRow=d.configured?
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">'+
+      '<div class="mono" style="margin-bottom:6px">🧪 Validate the router with one small real buy before trusting auto-fire:</div>'+
+      '<input id="sn-token" placeholder="token address 0x…" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:300px">'+
+      ' <input id="sn-teth" type="number" step="0.0001" value="0.0005" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:90px">'+
+      ' <button id="sn-test" class="snbtn" style="background:var(--panel2);color:#f0b429">Test buy</button>'+
+      ' <span id="sn-test-out" class="mono"></span>'+
+    '</div>':'';
+  panel.innerHTML=walletForm+acctLine+
     '<div style="margin-bottom:12px">'+onoff+' <span class="mono" style="margin-left:12px">'+wallet+'</span></div>'+
     '<div style="display:flex;flex-wrap:wrap;align-items:flex-end">'+
       '<div class="field"><label>Buy conviction min</label><input id="sn-min" type="number" value="'+s.minConviction+'"></div>'+
@@ -273,8 +286,23 @@ async function loadSniper(){
       '<div class="field"><label>Take profit %</label><input id="sn-tp" type="number" value="'+s.takeProfitPct+'"></div>'+
       '<button id="sn-save" class="snbtn" style="background:var(--panel2);color:var(--accent);margin-bottom:12px">Save</button>'+
     '</div>'+
-    '<div class="mono">per-trade cap '+d.caps.perTradeEth+' Ξ · daily cap '+d.caps.dailyEth+' Ξ · spent 24h '+d.caps.spentTodayEth+' Ξ</div>';
+    '<div class="mono">per-trade cap '+d.caps.perTradeEth+' Ξ · daily cap '+d.caps.dailyEth+' Ξ · spent 24h '+d.caps.spentTodayEth+' Ξ</div>'+
+    testRow;
   $('sniper-status').textContent=d.configured?(s.enabled?'— 🟢 armed':'— off'):'— not configured';
+  if($('sn-connect')) $('sn-connect').onclick=async()=>{
+    const key=$('sn-key').value.trim(); if(!key) return;
+    const r=await fetch('/api/sniper/wallet',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({privateKey:key})});
+    if(r.ok){ await loadSniper(); } else { alert('Invalid private key'); }
+  };
+  if($('sn-test')) $('sn-test').onclick=async()=>{
+    const token=$('sn-token').value.trim(); const eth=+$('sn-teth').value; const out=$('sn-test-out');
+    if(!token){ out.textContent='enter a token address'; return; }
+    out.textContent='sending…';
+    const r=await fetch('/api/sniper/test-buy',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({token,eth})});
+    const j=await r.json();
+    out.innerHTML = r.ok ? '✅ bought — tx '+short(j.position.buyTx) : '❌ '+(j.error||'failed');
+    await loadSniper();
+  };
   $('sn-toggle').onclick=async()=>{ await fetch('/api/sniper/toggle',{method:'POST',headers:adminHeaders()}); await loadSniper(); };
   $('sn-save').onclick=async()=>{
     const body={ minConviction:+$('sn-min').value, maxConviction:+$('sn-max').value, buyEth:+$('sn-buy').value, takeProfitPct:+$('sn-tp').value };

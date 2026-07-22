@@ -248,6 +248,33 @@ export async function buildServer(
     sniper.updateSettings({ enabled: !sniper.settings.enabled });
     return sniper.snapshot();
   });
+  // Set the hot-wallet key in-app (memory only; never persisted or echoed back).
+  app.post('/api/sniper/wallet', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const pk = (req.body as { privateKey?: string } | undefined)?.privateKey;
+    if (!pk || typeof pk !== 'string') return reply.code(400).send({ error: 'privateKey required' });
+    try {
+      const address = sniper.setPrivateKey(pk);
+      logger.info({ address }, 'sniper: wallet key set in-app');
+      return { ok: true, address };
+    } catch {
+      return reply.code(400).send({ error: 'invalid private key' });
+    }
+  });
+  // One controlled test buy to validate the router before trusting auto-fire.
+  app.post('/api/sniper/test-buy', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const b = req.body as { token?: string; eth?: number } | undefined;
+    if (!b?.token || !ADDR.test(b.token)) return reply.code(400).send({ error: 'valid token address required' });
+    try {
+      const pos = await sniper.testBuy(b.token.toLowerCase(), b.eth && b.eth > 0 ? b.eth : 0.0005);
+      return { ok: true, position: pos };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
+    }
+  });
 
   // ── Performance / outcomes ─────────────────────────────────────────────────────
   app.get('/api/performance', async (req) => {

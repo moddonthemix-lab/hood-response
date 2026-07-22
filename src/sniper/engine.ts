@@ -204,6 +204,42 @@ export class SniperEngine {
     }
   }
 
+  /** Set the hot-wallet key at runtime (from the dashboard). Returns the derived
+   *  address. Never persisted; lives in memory until restart. */
+  setPrivateKey(pk: string): string {
+    return this.executor.setPrivateKey(pk);
+  }
+
+  /** Manual one-off buy to validate the router before trusting auto-fire. Still
+   *  bounded by the min-buy floor and per-trade cap. */
+  async testBuy(token: string, ethAmount: number): Promise<Position> {
+    if (!this.executor.ready) throw new Error('wallet not configured');
+    const size = Math.min(config.SNIPER_MAX_ETH_PER_TRADE, Math.max(MIN_BUY_ETH, ethAmount));
+    const now = Date.now();
+    const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
+    const res = await this.executor.buy(token, size);
+    this.buys.push({ at: now, eth: res.ethSpent });
+    const pos: Position = {
+      id: randomUUID(),
+      token,
+      tokenSymbol: 'TEST-' + token.slice(2, 8).toUpperCase(),
+      kind: 'TEST',
+      conviction: 0,
+      ethIn: res.ethSpent,
+      entryPriceUsd: px > 0 ? px : 0,
+      entryMarketCap: 0,
+      tokensReceived: res.tokensReceived,
+      buyTx: res.txHash,
+      openedAt: now,
+      lastPriceUsd: px > 0 ? px : 0,
+      updatedAt: now,
+      status: 'open',
+    };
+    this.positions.set(pos.id, pos);
+    void this.persist();
+    return pos;
+  }
+
   updateSettings(patch: Partial<SniperSettings>): SniperSettings {
     if (typeof patch.enabled === 'boolean') this.settings.enabled = patch.enabled;
     if (typeof patch.minConviction === 'number') this.settings.minConviction = clamp(patch.minConviction, 0, 100);
