@@ -257,8 +257,14 @@ async function loadSniper(){
   const panel=$('sniper-panel');
   const warn=d.configured?'':'<div style="color:var(--red);margin-bottom:10px">⚠️ Not configured — set SNIPER_PRIVATE_KEY, SNIPER_ROUTER and SNIPER_WETH in Railway to enable real buys.</div>';
   const onoff='<button id="sn-toggle" class="snbtn" style="background:'+(s.enabled?'#0d2a17':'#2b1113')+';color:'+(s.enabled?'var(--green)':'var(--red)')+'">'+(s.enabled?'🟢 SNIPER ON':'⛔ SNIPER OFF')+'</button>';
-  const wallet=w.address?('wallet <code>'+short(w.address)+'</code> · balance '+(w.balanceEth==null?'?':w.balanceEth.toFixed(4))+' Ξ'):'no wallet';
-  panel.innerHTML=warn+
+  const wallet=w.address?('wallet <code>'+short(w.address)+'</code>'):'no wallet';
+  const acct=d.account||{};
+  const acctLine='<div style="margin-bottom:12px;display:flex;gap:22px;flex-wrap:wrap">'+
+    '<span>💰 <b>Robinhood ETH:</b> '+(acct.walletEth==null?'?':acct.walletEth)+' Ξ</span>'+
+    '<span>📈 Positions: '+(acct.positionsEth||0)+' Ξ</span>'+
+    '<span>🧮 <b>Account total:</b> '+(acct.totalEth==null?'?':acct.totalEth)+' Ξ</span>'+
+    '</div>';
+  panel.innerHTML=warn+acctLine+
     '<div style="margin-bottom:12px">'+onoff+' <span class="mono" style="margin-left:12px">'+wallet+'</span></div>'+
     '<div style="display:flex;flex-wrap:wrap;align-items:flex-end">'+
       '<div class="field"><label>Buy conviction min</label><input id="sn-min" type="number" value="'+s.minConviction+'"></div>'+
