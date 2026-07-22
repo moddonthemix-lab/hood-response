@@ -1,5 +1,18 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { getAddress } from 'ethers';
 import { z } from 'zod';
+
+/** Normalise an address to a valid EIP-55 checksum regardless of input casing;
+ *  returns '' for empty and leaves genuinely invalid strings as-is. */
+function normAddr(a: string): string {
+  const t = a.trim();
+  if (!t) return '';
+  try {
+    return getAddress(t.toLowerCase());
+  } catch {
+    return t;
+  }
+}
 
 /**
  * Minimal, dependency-free `.env` loader. Values already present in the real
@@ -227,6 +240,10 @@ export const config = {
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
   ),
+  // Normalise so any casing of the router/WETH addresses is accepted (ethers
+  // rejects a mixed-case address whose checksum doesn't match).
+  SNIPER_ROUTER: normAddr(env.SNIPER_ROUTER),
+  SNIPER_WETH: normAddr(env.SNIPER_WETH),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:
