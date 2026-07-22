@@ -162,6 +162,13 @@ export class PriceOracle {
     return this.fresh(tokenAddress)?.dexId ?? null;
   }
 
+  /** DexScreener pair identifier for the token's best pair, or null. On
+   *  Uniswap v4 chains this is the 32-byte POOL ID — the sniper uses it to
+   *  resolve the exact on-chain PoolKey instead of guessing pool params. */
+  pairIdOf(tokenAddress: string): string | null {
+    return this.fresh(tokenAddress)?.pairAddress || null;
+  }
+
   /**
    * Fetch this token's price/market cap right now if we don't already have a
    * fresh value. Used at alert time so the market cap in a notification is the

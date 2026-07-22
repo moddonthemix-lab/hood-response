@@ -160,7 +160,7 @@ export class SniperEngine {
     }
 
     try {
-      const res = await this.executor.buy(swarm.token, size);
+      const res = await this.executor.buy(swarm.token, size, this.price.pairIdOf(swarm.token));
       this.buys.push({ at: now, eth: res.ethSpent });
       const pos: Position = {
         id: randomUUID(),
@@ -216,7 +216,7 @@ export class SniperEngine {
   }
 
   private async closePosition(p: Position, reason: 'take-profit' | 'manual'): Promise<void> {
-    const res = await this.executor.sell(p.token);
+    const res = await this.executor.sell(p.token, this.price.pairIdOf(p.token));
     p.status = 'closed';
     p.closedAt = Date.now();
     p.sellTx = res.txHash;
@@ -256,7 +256,7 @@ export class SniperEngine {
     const size = Math.min(config.SNIPER_MAX_ETH_PER_TRADE, Math.max(MIN_BUY_ETH, ethAmount));
     const now = Date.now();
     const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
-    const res = await this.executor.buy(token, size);
+    const res = await this.executor.buy(token, size, this.price.pairIdOf(token));
     this.buys.push({ at: now, eth: res.ethSpent });
     const pos: Position = {
       id: randomUUID(),
