@@ -33,6 +33,11 @@ const INIT_TOPIC = '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e611083
 // ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const BAGS_HOOK = '0x2380aBf72C17aABAb76480244759AC7E2932EEcC';
+// Documented in Bags' own docs: "Singleton Uniswap v4 hook; takes the 2%
+// post-migration fee." Applies on EVERY swap through a Bags-launched pool —
+// buy and sell both — separate from gas and from any ERC-20-level tax GoPlus
+// can see (this fee lives in the pool's hook contract, not the token).
+const BAGS_HOOK_FEE_PCT = 2;
 const DYNAMIC_FEE = 0x800000;
 const ADDRESS_THIS = '0x0000000000000000000000000000000000000002'; // UR: the router itself
 
@@ -74,11 +79,19 @@ export interface BuyResult {
   txHash: string;
   tokensReceived: number;
   ethSpent: number;
+  /** Real network fee paid for this tx (gasUsed × effective gas price), ETH. */
+  gasEth: number;
 }
 export interface SellResult {
   txHash: string;
   ethReceived: number;
   tokensSold: number;
+  gasEth: number;
+}
+
+/** gasUsed × effective gas price, in ETH — the real network fee for a tx. */
+function gasCostEth(receipt: { gasUsed: bigint; gasPrice: bigint }): number {
+  return Number(formatEther(receipt.gasUsed * receipt.gasPrice));
 }
 
 /** A token's resolved v4 pool: the exact key plus which side the token is. */
@@ -248,6 +261,18 @@ export class SwapExecutor {
    *  2. Probe likely candidates (WETH or native × Bags-dynamic or standard
    *     static fee tiers) against StateView until one is initialized.
    */
+  /** Which hook (if any) governs this token's pool, and the documented % fee
+   *  it takes per swap — so the UI can show the real protocol fee alongside
+   *  gas and token tax, not just guess at where value went. */
+  async protocolFeeInfo(
+    token: string,
+    poolIdHint?: string | null,
+  ): Promise<{ hook: string; feePctPerSwap: number | null }> {
+    const pool = await this.resolvePool(token, poolIdHint);
+    const isBags = pool.hooks.toLowerCase() === BAGS_HOOK.toLowerCase();
+    return { hook: pool.hooks, feePctPerSwap: isBags ? BAGS_HOOK_FEE_PCT : null };
+  }
+
   private async resolvePool(token: string, poolIdHint?: string | null): Promise<ResolvedPool> {
     const cached = this.pools.get(token.toLowerCase());
     if (cached) return cached;
@@ -384,7 +409,7 @@ export class SwapExecutor {
       throw new Error(`swap reverted (${shortErr(err)})`);
     }
     logger.info({ token, ethAmount, tx: tx.hash }, 'sniper: buy sent');
-    await tx.wait(1);
+    const receipt = await tx.wait(1);
 
     let tokensReceived = 0;
     try {
@@ -394,7 +419,8 @@ export class SwapExecutor {
     } catch {
       /* balance read failed — tx still landed */
     }
-    return { txHash: tx.hash, tokensReceived, ethSpent: ethAmount };
+    const gasEth = receipt ? gasCostEth(receipt) : 0;
+    return { txHash: tx.hash, tokensReceived, ethSpent: ethAmount, gasEth };
   }
 
   /** Read the token's real symbol + total supply straight from the contract —
@@ -422,7 +448,7 @@ export class SwapExecutor {
   async readBuyTx(
     token: string,
     txHash: string,
-  ): Promise<{ ethSpent: number; tokensReceived: number; blockTimestamp: number }> {
+  ): Promise<{ ethSpent: number; tokensReceived: number; blockTimestamp: number; gasEth: number }> {
     this.init();
     if (!this.wallet || !this.provider) throw new Error('sniper wallet not configured');
     const tx = await this.provider.getTransaction(txHash);
@@ -450,6 +476,7 @@ export class SwapExecutor {
       ethSpent: Number(formatEther(tx.value)),
       tokensReceived: Number(formatUnits(rawAmount, decimals)),
       blockTimestamp: (block?.timestamp ?? Math.floor(Date.now() / 1000)) * 1000,
+      gasEth: gasCostEth(receipt),
     };
   }
 
@@ -538,11 +565,12 @@ export class SwapExecutor {
       throw new Error(`sell swap reverted (${shortErr(err)})`);
     }
     logger.info({ token, tx: tx.hash }, 'sniper: sell sent');
-    await tx.wait(1);
+    const receipt = await tx.wait(1);
     return {
       txHash: tx.hash,
       ethReceived: Number(formatEther(quotedOut)),
       tokensSold: Number(formatUnits(bal, decimals)),
+      gasEth: receipt ? gasCostEth(receipt) : 0,
     };
   }
 }

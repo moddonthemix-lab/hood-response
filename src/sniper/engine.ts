@@ -6,6 +6,7 @@ import { logger } from '../logger.js';
 import type { PriceOracle } from '../chain/price.js';
 import type { Swarm } from '../types.js';
 import { SwapExecutor } from './executor.js';
+import { SafetyChecker } from '../chain/safety.js';
 
 /** Absolute floor on any single buy, regardless of the configured amount. */
 export const MIN_BUY_ETH = 0.0005;
@@ -33,6 +34,17 @@ export interface Position {
   /** Per-position take-profit %, overriding the global setting when set.
    *  null explicitly disables take-profit for this position. */
   takeProfitPct?: number | null;
+  /** Real network fee paid for the buy tx, ETH. Undefined for 'imported'
+   *  positions (no real buy tx to read gas from). */
+  buyGasEth?: number;
+  /** Real network fee paid for the sell tx, ETH — set once closed. */
+  sellGasEth?: number;
+  /** GoPlus buy/sell tax % at buy time, for reference (null = unknown/unscanned). */
+  buyTaxPct?: number | null;
+  sellTaxPct?: number | null;
+  /** Documented DEX-hook protocol fee taken per swap (e.g. Bags' 2%), separate
+   *  from gas and from any ERC-20 tax GoPlus can see. null = no known hook fee. */
+  protocolFeePctPerSwap?: number | null;
 }
 
 /** Runtime-adjustable knobs (seeded from env, editable via the API). */
@@ -52,11 +64,17 @@ function view(p: Position) {
   const ref = p.status === 'closed' ? (p.exitPriceUsd ?? p.lastPriceUsd) : p.lastPriceUsd;
   const ratio = priceRatio(p, ref);
   const valueEth = p.ethIn * ratio;
+  const pnlEth = valueEth - p.ethIn;
+  const gasEth = (p.buyGasEth ?? 0) + (p.sellGasEth ?? 0);
   return {
     ...p,
     valueEth: Math.round(valueEth * 1e6) / 1e6,
-    pnlEth: Math.round((valueEth - p.ethIn) * 1e6) / 1e6,
+    pnlEth: Math.round(pnlEth * 1e6) / 1e6,
     pnlPct: Math.round((ratio - 1) * 1000) / 10,
+    gasEth: Math.round(gasEth * 1e6) / 1e6,
+    /** PnL after subtracting real network fees paid so far (buy gas always,
+     *  sell gas once closed) — the honest "what did I actually net" number. */
+    netPnlEth: Math.round((pnlEth - gasEth) * 1e6) / 1e6,
   };
 }
 
@@ -85,6 +103,7 @@ export class SniperEngine {
   private timer: NodeJS.Timeout | null = null;
   private warnedUnconfigured = false;
   readonly executor: SwapExecutor;
+  private readonly safety: SafetyChecker;
 
   settings: SniperSettings = {
     enabled: config.SNIPER_ENABLED,
@@ -97,8 +116,31 @@ export class SniperEngine {
   constructor(
     private readonly price: PriceOracle,
     executor?: SwapExecutor,
+    safety?: SafetyChecker,
   ) {
     this.executor = executor ?? new SwapExecutor();
+    this.safety = safety ?? new SafetyChecker();
+  }
+
+  /** Best-effort buy/sell tax lookup — never blocks or fails the caller. */
+  private async lookupTax(token: string): Promise<{ buyTaxPct: number | null; sellTaxPct: number | null }> {
+    try {
+      const liq = this.price.liquidityOf(token);
+      const report = await this.safety.check(token, liq);
+      return { buyTaxPct: report.buyTaxPct, sellTaxPct: report.sellTaxPct };
+    } catch {
+      return { buyTaxPct: null, sellTaxPct: null };
+    }
+  }
+
+  /** Best-effort documented DEX-hook fee lookup (e.g. Bags' 2%/swap). */
+  private async lookupProtocolFee(token: string): Promise<number | null> {
+    try {
+      const info = await this.executor.protocolFeeInfo(token, this.price.pairIdOf(token));
+      return info.feePctPerSwap;
+    } catch {
+      return null;
+    }
   }
 
   start(): void {
@@ -168,6 +210,10 @@ export class SniperEngine {
     try {
       const res = await this.executor.buy(swarm.token, size, this.price.pairIdOf(swarm.token));
       this.buys.push({ at: now, eth: res.ethSpent });
+      const [tax, protocolFeePctPerSwap] = await Promise.all([
+        this.lookupTax(swarm.token),
+        this.lookupProtocolFee(swarm.token),
+      ]);
       const pos: Position = {
         id: randomUUID(),
         token: swarm.token,
@@ -183,6 +229,10 @@ export class SniperEngine {
         lastPriceUsd: entryPrice,
         updatedAt: now,
         status: 'open',
+        buyGasEth: res.gasEth,
+        buyTaxPct: tax.buyTaxPct,
+        sellTaxPct: tax.sellTaxPct,
+        protocolFeePctPerSwap,
       };
       this.positions.set(pos.id, pos);
       this.decide(swarm, 'bought', `bought ${size} Ξ · tx ${res.txHash.slice(0, 10)}`);
@@ -229,6 +279,7 @@ export class SniperEngine {
     p.sellTx = res.txHash;
     p.exitPriceUsd = p.lastPriceUsd;
     p.closeReason = reason;
+    p.sellGasEth = res.gasEth;
     logger.info({ token: p.tokenSymbol, tx: res.txHash, ethOut: res.ethReceived, reason }, 'sniper: position sold');
     void this.persist();
   }
@@ -292,6 +343,10 @@ export class SniperEngine {
     const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
     const res = await this.executor.buy(token, size, this.price.pairIdOf(token));
     this.buys.push({ at: now, eth: res.ethSpent });
+    const [tax, protocolFeePctPerSwap] = await Promise.all([
+      this.lookupTax(token),
+      this.lookupProtocolFee(token),
+    ]);
     const pos: Position = {
       id: randomUUID(),
       token,
@@ -307,6 +362,10 @@ export class SniperEngine {
       lastPriceUsd: px > 0 ? px : 0,
       updatedAt: now,
       status: 'open',
+      buyGasEth: res.gasEth,
+      buyTaxPct: tax.buyTaxPct,
+      sellTaxPct: tax.sellTaxPct,
+      protocolFeePctPerSwap,
     };
     this.positions.set(pos.id, pos);
     void this.persist();
@@ -396,10 +455,13 @@ export class SniperEngine {
   async restoreFromTx(token: string, txHash: string): Promise<Position> {
     if (!this.executor.ready) throw new Error('wallet not connected');
     this.clearReplaceableRecord(token, txHash);
-    const [{ ethSpent, tokensReceived, blockTimestamp }, meta] = await Promise.all([
-      this.executor.readBuyTx(token, txHash),
-      this.executor.tokenMeta(token),
-    ]);
+    const [{ ethSpent, tokensReceived, blockTimestamp, gasEth }, meta, tax, protocolFeePctPerSwap] =
+      await Promise.all([
+        this.executor.readBuyTx(token, txHash),
+        this.executor.tokenMeta(token),
+        this.lookupTax(token),
+        this.lookupProtocolFee(token),
+      ]);
     await this.price.refreshNow(token).catch(() => undefined);
     const currentPx = this.price.isLive(token) ? this.price.priceOf(token) : 0;
     const ethUsd = this.price.ethUsdPrice();
@@ -427,6 +489,10 @@ export class SniperEngine {
       lastPriceUsd: currentPx > 0 ? currentPx : entryPriceUsd,
       updatedAt: now,
       status: 'open',
+      buyGasEth: gasEth,
+      buyTaxPct: tax.buyTaxPct,
+      sellTaxPct: tax.sellTaxPct,
+      protocolFeePctPerSwap,
     };
     this.positions.set(pos.id, pos);
     void this.persist();
@@ -470,6 +536,7 @@ export class SniperEngine {
     const realizedPnlEth = closed.reduce((s, p) => s + p.pnlEth, 0);
     const investedEth = open.reduce((s, p) => s + p.ethIn, 0);
     const openValueEth = open.reduce((s, p) => s + p.valueEth, 0);
+    const totalGasEth = positions.reduce((s, p) => s + p.gasEth, 0);
     const walletEth = await this.executor.balanceEth();
     return {
       configured: this.executor.ready,
@@ -489,6 +556,8 @@ export class SniperEngine {
         unrealizedPnlEth: round6(unrealizedPnlEth),
         realizedPnlEth: round6(realizedPnlEth),
         totalPnlEth: round6(unrealizedPnlEth + realizedPnlEth),
+        totalGasEth: round6(totalGasEth),
+        netPnlEth: round6(unrealizedPnlEth + realizedPnlEth - totalGasEth),
       },
       decisions: [...this.decisions].reverse(),
       removedLog: [...this.removedLog].reverse(),
