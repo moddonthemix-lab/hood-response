@@ -174,6 +174,10 @@ export interface Swarm {
   repeatNewWallet?: boolean;
   /** The rolling repeat window in minutes (for display, e.g. "2nd in 35m"). */
   repeatWindowMinutes?: number;
+  /** True when this alert hits the PRIME bar (kind + conviction combo backed by
+   *  real outcome data — see PRIME_KINDS / PRIME_MIN_CONVICTION). The loudest,
+   *  most-likely-to-run signal; flagged hard in the card and on the dashboard. */
+  prime?: boolean;
   conviction: number;
   convictionBreakdown: ConvictionBreakdown;
   windowSeconds: number;

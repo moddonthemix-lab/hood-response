@@ -22,8 +22,9 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 }
 
 async function sendDiscord(url: string, s: Swarm): Promise<NotificationDelivery> {
-  const color =
-    s.kind === 'BUY'
+  const color = s.prime
+    ? 0xffd700 // gold — PRIME overrides the kind color, loudest tier
+    : s.kind === 'BUY'
       ? 0x16a34a
       : s.kind === 'SELL'
         ? 0xdc2626

@@ -9,6 +9,11 @@ export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   ENTRY: '🌱🪰',
 };
 
+/** PRIME multiplies the kind icon itself — the swarm literally gets bigger. */
+function primeIcon(s: Swarm): string {
+  return s.prime ? KIND_EMOJI[s.kind].repeat(3) : KIND_EMOJI[s.kind];
+}
+
 // ── formatting helpers ────────────────────────────────────────────────────────
 export function usd(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -99,7 +104,17 @@ function typeTitle(s: Swarm): string {
 }
 
 export function headline(s: Swarm): string {
-  return `${KIND_EMOJI[s.kind]} ${typeTitle(s)}`;
+  return s.prime
+    ? `👑 PRIME 👑 ${primeIcon(s)} ${typeTitle(s)}`
+    : `${KIND_EMOJI[s.kind]} ${typeTitle(s)}`;
+}
+
+/** The loud, fly-swarming banner PRIME alerts open with — more flies, and the
+ *  alert icon itself multiplies (3x), same idea as the header. */
+function primeBanner(s: Swarm): string[] {
+  if (!s.prime) return [];
+  const swarm = '🪰'.repeat(9);
+  return [swarm, `👑 PRIME SIGNAL 👑 ${primeIcon(s)}`, swarm];
 }
 
 /** The card's stacked display lines (no links; shared by plain + HTML). */
@@ -109,8 +124,10 @@ function cardLines(s: Swarm): string[] {
   const buys = s.momentum?.buys ?? null;
   const sells = s.momentum?.sells ?? null;
 
+  const prime = primeBanner(s);
   const repeat = repeatLines(s);
   const lines: string[] = [
+    ...(prime.length ? [...prime, ``] : []),
     ...(repeat.length ? [...repeat, ``] : []),
     `${marker} ${sym} [${compact(s.marketCap)}] $${sym}`,
     `⛓️ Robinhood · ${s.dex ?? 'dex'}`,
@@ -137,7 +154,8 @@ function cardLines(s: Swarm): string[] {
 
 // ── plain text (generic webhooks) ─────────────────────────────────────────────
 export function textBody(s: Swarm): string {
-  const lines = [`🪰 SWARM THE FLY`, typeTitle(s), ``, ...cardLines(s), ``, s.token];
+  const fly = s.prime ? '🪰'.repeat(3) : '🪰';
+  const lines = [`${fly} SWARM THE FLY ${fly}`, typeTitle(s), ``, ...cardLines(s), ``, s.token];
   lines.push(`📊 Chart: ${s.dexUrl}`);
   lines.push(`🔎 Explorer: ${explorerUrl(s.token)}`);
   return lines.join('\n');
@@ -149,8 +167,9 @@ const esc = (str: string): string =>
 
 export function telegramHtml(s: Swarm): string {
   const body = cardLines(s).map(esc).join('\n');
+  const fly = s.prime ? '🪰'.repeat(3) : '🪰';
   return (
-    `🪰 <b>SWARM THE FLY</b>\n` +
+    `${fly} <b>SWARM THE FLY</b> ${fly}\n` +
     `<b>${esc(typeTitle(s))}</b>\n\n` +
     `${body}\n\n` +
     `<code>${esc(s.token)}</code>\n` +

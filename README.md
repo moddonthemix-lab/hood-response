@@ -25,6 +25,7 @@ cross-coin conviction wallets. Refresh/expand the list any time with
 | **Safety filter** | before any alert fires, the token is screened via GoPlus token-security (honeypot, buy/sell tax, mintable, ownership, LP lock — supported on Robinhood Chain) + a minimum DEX liquidity check; rugs/honeypots are suppressed (still shown on the dashboard, tagged). Tunable via `SAFETY_*`, degrades to a liquidity-only check if GoPlus is unreachable |
 | **Solo low-cap alerts** | a *single* tracked wallet buying a coin fires an alert too — but only when the token's market cap is inside the band `SOLO_MIN_MARKETCAP`–`SOLO_MAX_MARKETCAP` (default $25k–$120k), to catch early low-cap entries without dust or large caps |
 | **Fresh-pair first entry** | fires when a qualifying-tier wallet (`FRESH_ENTRY_TIERS`, default alpha+beta) makes its *first-ever* buy of a token whose DEX pair is younger than `FRESH_PAIR_MAX_AGE_HOURS` (default 48h) — the purest "ground floor" signal |
+| **PRIME tier** | the loudest alert — flagged when the swarm's kind + conviction hit the combo that actually backtested well (`PRIME_KINDS` default `ENTRY` @ `PRIME_MIN_CONVICTION` default 80, derived from real tracked-call outcomes). PRIME alerts get a 👑 crown headline, a multiplied 🪰 fly banner, and the kind icon itself repeats 3x — same treatment on Telegram, webhooks, Discord (gold embed), and the dashboard (👑 PRIME badge). Toggle with `PRIME_ALERTS` |
 | **Global alert floors** | *every* alert type is gated by `ALERT_MIN_MARKETCAP` (default $25k) and `PAIR_MIN_AGE_MINUTES` (default 30 min) — nothing below the cap floor or on a pair younger than the age floor ever fires |
 | **Real market cap** | market cap is fetched live from DexScreener at alert time (not just the cached/synthetic value), so every alert reports the true cap it was bought/sold into |
 | **Volume + momentum** | alerts show 24h volume, recent price change, and buy pressure; when volume + direction confirm momentum the alert is flagged 🔥 and conviction is boosted (up to +15). Optional `MOMENTUM_MIN_VOLUME_USD` gate suppresses dead tokens |
@@ -135,6 +136,9 @@ alert rules are additionally editable at runtime through the API. Key vars:
 | `ALERT_WINDOW_SECONDS` | `300` | default detection window (5 min) |
 | `ALERT_MIN_USD` / `ALERT_MIN_CONVICTION` | `0` / `0` | default gates |
 | `ALERT_COOLDOWN_SECONDS` | `120` | per rule/token/kind cooldown |
+| `PRIME_ALERTS` | `true` | loudest alert tier for the kind+conviction combo backed by real outcome data |
+| `PRIME_KINDS` | `ENTRY` | comma-separated swarm kinds eligible for PRIME |
+| `PRIME_MIN_CONVICTION` | `80` | minimum conviction (of an eligible kind) to hit PRIME |
 | `REPEAT_WINDOW_MINUTES` | `35` | rolling window for the repeat/escalation counter |
 | `IGNORE_DUST_USD` | `25` | drop swaps below this notional |
 | `IGNORE_STABLECOINS` | `true` | ignore tokens flagged stable |

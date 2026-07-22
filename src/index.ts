@@ -99,6 +99,14 @@ async function main(): Promise<void> {
     if (swarm.freshPair) adj += 3;
     if (swarm.momentum?.confirmed) adj += swarm.momentum.boost;
     swarm.conviction = Math.max(0, Math.min(100, swarm.conviction + adj));
+
+    // PRIME: the kind+conviction combo that actually backtested well (ENTRY @
+    // conviction 80+ averaged a 79% peak vs 52% baseline — see performance
+    // history). Computed last, after conviction is finalized above.
+    swarm.prime =
+      config.PRIME_ALERTS &&
+      config.primeKinds.has(swarm.kind) &&
+      swarm.conviction >= config.PRIME_MIN_CONVICTION;
   };
 
   // Record the swarm, then alert only if it passes the safety screen (honeypot /
