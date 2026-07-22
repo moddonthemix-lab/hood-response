@@ -256,6 +256,16 @@ function snPosRow(p,globalTp){
     '<span class="grow mono">in '+p.ethIn+' Ξ · '+entryLabel+' '+usd(p.entryMarketCap)+' MC · '+tx+'</span>'+
     '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
     '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell+untrack;
+  const gasEth=p.gasEth||0; const netPnl=p.netPnlEth==null?p.pnlEth:p.netPnlEth;
+  const buyTax=p.buyTaxPct==null?'?':p.buyTaxPct+'%'; const sellTax=p.sellTaxPct==null?'?':p.sellTaxPct+'%';
+  const protoFee=p.protocolFeePctPerSwap;
+  const protoStr=protoFee==null?'':(' · 🏷️ protocol fee '+protoFee+'%/swap (buy+sell, DEX hook — not gas or tax)');
+  const feeWrap=document.createElement('div');
+  feeWrap.style.cssText='flex-basis:100%;display:flex;gap:16px;flex-wrap:wrap;padding-top:4px;margin-top:2px;border-top:1px dashed var(--line)';
+  feeWrap.innerHTML='<span class="mono" style="color:var(--muted)">⛽ gas '+gasEth+' Ξ</span>'+
+    '<span class="mono" style="color:var(--muted)" title="GoPlus scan at buy time">💸 token tax buy '+buyTax+' / sell '+sellTax+protoStr+'</span>'+
+    '<span class="mono" title="PnL after subtracting real gas fees paid (protocol fee already baked into tokens received / not-yet-realized on sell)">🧮 net after gas '+(netPnl>=0?'+':'')+netPnl+' Ξ</span>';
+  d.appendChild(feeWrap);
   if(p.status==='open'){
     const override=(p.takeProfitPct!==undefined&&p.takeProfitPct!==null);
     const disabled=(p.takeProfitPct===null);
@@ -370,7 +380,8 @@ function updateSniperDynamic(d){
   const s=d.settings||{};
   $('sniper-status').textContent=d.configured?(s.enabled?'— 🟢 armed':'— off'):'— not configured';
   const p=d.pnl||{}; const tot=p.totalPnlEth||0;
-  $('sniper-pnl').textContent='— total PnL '+(tot>=0?'+':'')+tot+' Ξ · open '+(p.openValueEth||0)+' Ξ (in '+(p.investedEth||0)+') · realized '+(p.realizedPnlEth||0)+' Ξ';
+  const netTot=p.netPnlEth==null?tot:p.netPnlEth;
+  $('sniper-pnl').textContent='— total PnL '+(tot>=0?'+':'')+tot+' Ξ · open '+(p.openValueEth||0)+' Ξ (in '+(p.investedEth||0)+') · realized '+(p.realizedPnlEth||0)+' Ξ · gas paid '+(p.totalGasEth||0)+' Ξ · net after gas '+(netTot>=0?'+':'')+netTot+' Ξ';
   const de=$('sn-decisions');
   if(de){ const ds=d.decisions||[];
     if(!ds.length){ de.innerHTML='<div class="empty">no alerts seen yet</div>'; }
