@@ -1,5 +1,5 @@
 import type { Swarm } from '../types.js';
-import { explorerUrl } from '../links.js';
+import { explorerUrl, sigmaBuyUrl, basedBuyUrl } from '../links.js';
 
 export const KIND_EMOJI: Record<Swarm['kind'], string> = {
   BUY: '🟢🪰',
@@ -117,6 +117,16 @@ function primeBanner(s: Swarm): string[] {
   return [swarm, `👑 PRIME SIGNAL 👑 ${primeIcon(s)}`, swarm];
 }
 
+/** All-time-high market cap suffix for the MC line, e.g. " · 🏔️ ATH 500.0K (-80%)".
+ *  "" when no ATH has been observed yet (token never had a live price). */
+function athLabel(s: Swarm): string {
+  const ath = s.athMarketCap;
+  if (ath == null) return '';
+  const down =
+    ath > 0 && s.marketCap > 0 ? Math.round(((s.marketCap - ath) / ath) * 1000) / 10 : null;
+  return `  ·  🏔️ ATH ${compact(ath)}${down != null ? ` (${down}%)` : ''}`;
+}
+
 /** The card's stacked display lines (no links; shared by plain + HTML). */
 function cardLines(s: Swarm): string[] {
   const sym = s.tokenSymbol;
@@ -132,7 +142,7 @@ function cardLines(s: Swarm): string[] {
     `${marker} ${sym} [${compact(s.marketCap)}] $${sym}`,
     `⛓️ Robinhood · ${s.dex ?? 'dex'}`,
     `💰 $${fmtPrice(s.priceUsd)}`,
-    `💎 MC ${compact(s.marketCap)}${s.priceLive ? '' : ' (est)'}  ·  💧 Liq ${compact(s.liquidityUsd)}`,
+    `💎 MC ${compact(s.marketCap)}${s.priceLive ? '' : ' (est)'}${athLabel(s)}  ·  💧 Liq ${compact(s.liquidityUsd)}`,
     `📊 Vol ${compact(s.momentum?.volumeUsd)}  ·  ⏳ Age ${fmtAge(s.pairAgeHours)}`,
     `📈 24h ${pct(s.momentum?.priceChange24h)}  ·  1h ${pct(s.momentum?.priceChange1h)}  ·  🅑 ${buys ?? '?'} 🅢 ${sells ?? '?'}`,
     ``,
@@ -158,6 +168,10 @@ export function textBody(s: Swarm): string {
   const lines = [`${fly} SWARM THE FLY ${fly}`, typeTitle(s), ``, ...cardLines(s), ``, s.token];
   lines.push(`📊 Chart: ${s.dexUrl}`);
   lines.push(`🔎 Explorer: ${explorerUrl(s.token)}`);
+  const sigma = sigmaBuyUrl(s.token);
+  if (sigma) lines.push(`🎯 Buy SGM: ${sigma}`);
+  const based = basedBuyUrl(s.token);
+  if (based) lines.push(`🎲 Buy BSD: ${based}`);
   return lines.join('\n');
 }
 
@@ -168,11 +182,18 @@ const esc = (str: string): string =>
 export function telegramHtml(s: Swarm): string {
   const body = cardLines(s).map(esc).join('\n');
   const fly = s.prime ? '🪰'.repeat(3) : '🪰';
+  const sigma = sigmaBuyUrl(s.token);
+  const based = basedBuyUrl(s.token);
+  const buyLinks = [
+    sigma ? `<a href="${esc(sigma)}">🎯 Buy SGM</a>` : null,
+    based ? `<a href="${esc(based)}">🎲 Buy BSD</a>` : null,
+  ].filter((x): x is string => x != null);
   return (
     `${fly} <b>SWARM THE FLY</b> ${fly}\n` +
     `<b>${esc(typeTitle(s))}</b>\n\n` +
     `${body}\n\n` +
     `<code>${esc(s.token)}</code>\n` +
-    `📊 <a href="${esc(s.dexUrl)}">Chart</a>  ·  🔎 <a href="${esc(explorerUrl(s.token))}">Explorer</a>`
+    `📊 <a href="${esc(s.dexUrl)}">Chart</a>  ·  🔎 <a href="${esc(explorerUrl(s.token))}">Explorer</a>` +
+    (buyLinks.length ? `\n${buyLinks.join('  ·  ')}` : '')
   );
 }

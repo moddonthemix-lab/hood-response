@@ -65,3 +65,30 @@ describe('PRIME formatting', () => {
     expect(headline(s)).not.toContain('PRIME');
   });
 });
+
+describe('ATH market cap on the card', () => {
+  it('shows the ATH and % off it when known', () => {
+    const s = swarm({ marketCap: 50_000, athMarketCap: 200_000 });
+    const body = textBody(s);
+    expect(body).toContain('🏔️ ATH');
+    expect(body).toContain('(-75%)');
+  });
+
+  it('omits the ATH line when unknown', () => {
+    const s = swarm({ athMarketCap: null });
+    expect(textBody(s)).not.toContain('🏔️');
+  });
+});
+
+describe('buy bot links', () => {
+  it('includes SGM and BSD buy links templated with the token address', () => {
+    const s = swarm({ token: '0xdeadbeef' });
+    const text = textBody(s);
+    expect(text).toContain('Sigma_buyBot?start=x');
+    expect(text).toContain('0xdeadbeef');
+    expect(text).toContain('based_eth_bot?start=r_');
+    const html = telegramHtml(s);
+    expect(html).toContain('🎯 Buy SGM');
+    expect(html).toContain('🎲 Buy BSD');
+  });
+});

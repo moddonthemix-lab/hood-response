@@ -135,6 +135,10 @@ export interface Swarm {
   /** Token market cap (USD) at the moment of the swarm — the cap the wallets
    *  bought or sold into. */
   marketCap: number;
+  /** Highest market cap seen for this token since the bot started tracking it
+   *  (not a true lifetime ATH — DexScreener doesn't expose one). Null when
+   *  unknown (no live pair yet). Always >= marketCap. */
+  athMarketCap?: number | null;
   /** True when this swarm is on a token discovered by tracked wallets rather
    *  than one from the original seed set — the early-discovery signal. */
   newToken: boolean;

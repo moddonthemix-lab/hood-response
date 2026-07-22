@@ -19,3 +19,17 @@ export function explorerUrl(tokenAddress: string): string {
   const base = config.EXPLORER_BASE.replace(/\/$/, '');
   return `${base}/token/${tokenAddress.toLowerCase()}`;
 }
+
+/** One-tap Sigma bot buy link, pre-filled with the token contract. Null when
+ *  no referral id is configured (SIGMA_REF). */
+export function sigmaBuyUrl(tokenAddress: string): string | null {
+  if (!config.SIGMA_REF) return null;
+  return `https://t.me/Sigma_buyBot?start=x${config.SIGMA_REF}-${tokenAddress}`;
+}
+
+/** One-tap Based bot buy link, pre-filled with the token contract. Null when
+ *  no referral id is configured (BASED_REF). */
+export function basedBuyUrl(tokenAddress: string): string | null {
+  if (!config.BASED_REF) return null;
+  return `https://t.me/based_eth_bot?start=r_${config.BASED_REF}_b_${tokenAddress}`;
+}
