@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SniperEngine, MIN_BUY_ETH } from '../sniper/engine.js';
+import { config } from '../config/env.js';
 import type { SwapExecutor } from '../sniper/executor.js';
 import type { Swarm } from '../types.js';
 
@@ -12,7 +13,13 @@ function stubPrice(prices: Record<string, number>) {
   } as unknown as import('../chain/price.js').PriceOracle;
 }
 
-function stubExecutor(log: string[]) {
+function stubExecutor(
+  log: string[],
+  overrides: Partial<{
+    valueInEth: (token: string) => Promise<{ tokens: number; ethOut: number }>;
+    tokenMeta: (token: string) => Promise<{ symbol: string; totalSupply: number }>;
+  }> = {},
+) {
   return {
     ready: true,
     address: () => '0xwallet',
@@ -27,6 +34,8 @@ function stubExecutor(log: string[]) {
       log.push('sell:' + token);
       return { txHash: '0xsell', ethReceived: 0.002, tokensSold: 1000 };
     },
+    valueInEth: overrides.valueInEth ?? (async () => ({ tokens: 1000, ethOut: 0.001 })),
+    tokenMeta: overrides.tokenMeta ?? (async () => ({ symbol: 'REAL', totalSupply: 1_000_000 })),
   } as unknown as SwapExecutor;
 }
 
@@ -130,5 +139,66 @@ describe('SniperEngine', () => {
     expect(snap.positions[0]!.status).toBe('closed');
     expect(snap.positions[0]!.closeReason).toBe('take-profit');
     expect(snap.pnl.realizedPnlEth).toBeCloseTo(0.0005, 6); // entry 0.0005 Ξ → 2x = +0.0005
+  });
+
+  it('imports a wallet holding with the real symbol, MC, and a market-priced ETH value', async () => {
+    // On-chain quote returns ~0 (thin/odd route) but the market price is real —
+    // ethIn should come from tokens*price/ETHprice, not the flaky quote.
+    const prices: Record<string, number> = {
+      '0xheld': 0.001, // token USD price
+      [config.SNIPER_WETH]: 2000, // ETH USD price
+    };
+    const eng = new SniperEngine(stubPrice(prices), stubExecutor([], {
+      valueInEth: async () => ({ tokens: 1000, ethOut: 0 }), // flaky on-chain quote
+      tokenMeta: async () => ({ symbol: 'IMAGINE', totalSupply: 1_000_000 }),
+    }));
+    const pos = await eng.importPosition('0xheld');
+    expect(pos.tokenSymbol).toBe('IMAGINE');
+    expect(pos.entryMarketCap).toBe(1000); // 0.001 * 1,000,000
+    // 1000 tokens * $0.001 / ($2000/ETH) = 0.0005 ETH — not the flaky 0 quote.
+    expect(pos.ethIn).toBeCloseTo(0.0005, 6);
+  });
+
+  it('re-importing an already-tracked token replaces the stale record', async () => {
+    const prices: Record<string, number> = { '0xheld': 0.001, [config.SNIPER_WETH]: 2000 };
+    const eng = new SniperEngine(stubPrice(prices), stubExecutor([]));
+    const first = await eng.importPosition('0xheld');
+    const second = await eng.importPosition('0xheld');
+    expect(second.id).not.toBe(first.id);
+    const snap = await eng.snapshot();
+    expect(snap.positions.filter((p) => p.status === 'open')).toHaveLength(1);
+  });
+
+  it('per-position take-profit overrides the global setting', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const eng = new SniperEngine(stubPrice(prices), stubExecutor([]));
+    eng.updateSettings({ enabled: true, takeProfitPct: 90 }); // global: far away
+    await eng.onAlert(swarm());
+    const id = (await eng.snapshot()).positions[0]!.id;
+    eng.setPositionTakeProfit(id, 20); // this position: much tighter
+
+    prices['0xtok'] = 1.25; // +25% — past this position's 20%, not the global 90%
+    // @ts-expect-error exercise the private sampler
+    await eng.sample();
+
+    const snap = await eng.snapshot();
+    expect(snap.positions[0]!.status).toBe('closed');
+    expect(snap.positions[0]!.closeReason).toBe('take-profit');
+  });
+
+  it('setting take-profit to null disables it for that position', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const eng = new SniperEngine(stubPrice(prices), stubExecutor([]));
+    eng.updateSettings({ enabled: true, takeProfitPct: 10 }); // global would fire
+    await eng.onAlert(swarm());
+    const id = (await eng.snapshot()).positions[0]!.id;
+    eng.setPositionTakeProfit(id, null); // disable for this one
+
+    prices['0xtok'] = 2; // +100%, well past the global 10%
+    // @ts-expect-error exercise the private sampler
+    await eng.sample();
+
+    const snap = await eng.snapshot();
+    expect(snap.positions[0]!.status).toBe('open'); // stays open — TP is off
   });
 });

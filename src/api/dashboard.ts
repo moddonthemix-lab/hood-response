@@ -241,8 +241,8 @@ async function loadFilters(){
 }
 
 // ── Sniper tab ────────────────────────────────────────────────────────────────
-function snPosRow(p){
-  const d=document.createElement('div'); d.className='row';
+function snPosRow(p,globalTp){
+  const d=document.createElement('div'); d.className='row'; d.style.flexWrap='wrap';
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
   const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
@@ -253,6 +253,19 @@ function snPosRow(p){
     '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC · '+tx+'</span>'+
     '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
     '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell+untrack;
+  if(p.status==='open'){
+    const override=(p.takeProfitPct!==undefined&&p.takeProfitPct!==null);
+    const disabled=(p.takeProfitPct===null);
+    const effective=override?p.takeProfitPct:globalTp;
+    const tpWrap=document.createElement('div');
+    tpWrap.style.cssText='flex-basis:100%;display:flex;align-items:center;gap:6px;padding-top:4px;margin-top:2px;border-top:1px dashed var(--line)';
+    tpWrap.innerHTML='<span class="mono" style="color:var(--muted)">🎯 TP: '+(disabled?'off':(effective+'%'+(override?' (custom)':' (default)')))+'</span>'+
+      '<input class="sn-tp-input" type="number" placeholder="%" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:3px 6px;font:12px inherit;width:70px" value="'+(override&&!disabled?p.takeProfitPct:'')+'">'+
+      '<button class="snbtn sn-tp-set" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--accent)">Set</button>'+
+      '<button class="snbtn sn-tp-clear" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--muted)">Use default</button>'+
+      '<button class="snbtn sn-tp-off" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--red)">Off</button>';
+    d.appendChild(tpWrap);
+  }
   return d;
 }
 // Rebuild the settings/wallet/test form. Called only on open + after an action
@@ -349,13 +362,28 @@ function updateSniperDynamic(d){
     }).join(''); }
   const el=$('sniper-positions'); el.innerHTML='';
   const ps=d.positions||[];
+  const globalTp=(d.settings&&d.settings.takeProfitPct)||0;
   if(!ps.length){ el.innerHTML='<div class="empty">no positions yet — turn Sniper on and wait for a qualifying alert</div>'; }
-  else ps.forEach(pp=>el.appendChild(snPosRow(pp)));
+  else ps.forEach(pp=>el.appendChild(snPosRow(pp,globalTp)));
   el.querySelectorAll('.sn-sell').forEach(b=>b.onclick=async()=>{
     if(!confirm('Sell this position now?')) return;
     b.disabled=true; b.textContent='selling…';
     const r=await fetch('/api/sniper/sell/'+b.dataset.id,{method:'POST',headers:adminHeaders()});
     if(!r.ok){ const j=await r.json().catch(()=>({})); alert('Sell failed: '+(j.error||'error')); }
+    await loadSniper(false);
+  });
+  el.querySelectorAll('.sn-tp-set').forEach(b=>b.onclick=async()=>{
+    const input=b.parentElement.querySelector('.sn-tp-input'); const val=+input.value;
+    if(!(val>0)){ alert('enter a positive %'); return; }
+    await fetch('/api/sniper/position/'+b.dataset.id+'/tp',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({pct:val})});
+    await loadSniper(false);
+  });
+  el.querySelectorAll('.sn-tp-clear').forEach(b=>b.onclick=async()=>{
+    await fetch('/api/sniper/position/'+b.dataset.id+'/tp',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({pct:'default'})});
+    await loadSniper(false);
+  });
+  el.querySelectorAll('.sn-tp-off').forEach(b=>b.onclick=async()=>{
+    await fetch('/api/sniper/position/'+b.dataset.id+'/tp',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({pct:null})});
     await loadSniper(false);
   });
   el.querySelectorAll('.sn-untrack').forEach(b=>b.onclick=async()=>{

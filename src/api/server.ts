@@ -275,6 +275,22 @@ export async function buildServer(
       return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
     }
   });
+  // Set a per-position take-profit override: { pct: number } to set a custom
+  // value, { pct: null } to disable TP for this position, or { pct: "default" }
+  // to clear the override and fall back to the global setting.
+  app.post('/api/sniper/position/:id/tp', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const id = (req.params as { id: string }).id;
+    const b = req.body as { pct?: number | null | 'default' } | undefined;
+    const pct = b?.pct === 'default' ? undefined : (b?.pct ?? null);
+    try {
+      const pos = sniper.setPositionTakeProfit(id, pct);
+      return { ok: true, position: pos };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err instanceof Error ? err.message : err) });
+    }
+  });
   // Stop tracking a position without selling (e.g. to clear a bad import and
   // re-import cleanly). Wallet holdings are untouched.
   app.delete('/api/sniper/position/:id', async (req, reply) => {
