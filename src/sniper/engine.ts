@@ -289,8 +289,23 @@ export class SniperEngine {
     return this.settings;
   }
 
-  /** Full snapshot for the API/dashboard. */
+  /** Full snapshot for the API/dashboard. Refreshes open-position prices from
+   *  the oracle first so PnL is as live as the price feed on every poll (the
+   *  oracle caches, so this only hits the network when a price is stale). */
   async snapshot() {
+    const openTokens = [...new Set(
+      [...this.positions.values()].filter((p) => p.status === 'open').map((p) => p.token),
+    )];
+    await Promise.all(openTokens.map((t) => this.price.refreshNow(t).catch(() => undefined)));
+    const now = Date.now();
+    for (const p of this.positions.values()) {
+      if (p.status !== 'open') continue;
+      const px = this.price.isLive(p.token) ? this.price.priceOf(p.token) : 0;
+      if (px > 0) {
+        p.lastPriceUsd = px;
+        p.updatedAt = now;
+      }
+    }
     const positions = [...this.positions.values()]
       .map(view)
       .sort((a, b) => (b.status === 'open' ? 1 : 0) - (a.status === 'open' ? 1 : 0) || b.openedAt - a.openedAt);
@@ -341,7 +356,13 @@ export class SniperEngine {
   }
   private persisting = false;
   private async persist(): Promise<void> {
-    if (!config.SNIPER_STORE_PATH || this.persisting) return;
+    if (this.persisting) return;
+    await this.flush();
+  }
+  /** Write positions to disk now (used on each change and on graceful shutdown
+   *  so the pre-redeploy state is captured). */
+  async flush(): Promise<void> {
+    if (!config.SNIPER_STORE_PATH) return;
     this.persisting = true;
     try {
       const path = config.SNIPER_STORE_PATH;

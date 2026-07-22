@@ -115,6 +115,7 @@ export async function buildServer(
     channels: configuredChannels(),
     persistence: { database: config.hasDatabase, redis: config.hasRedis },
     dexscreenerChain: config.DEXSCREENER_CHAIN || null,
+    explorerBase: config.EXPLORER_BASE.replace(/\/$/, ''),
   }));
 
   // ── Tokens ──────────────────────────────────────────────────────────────────

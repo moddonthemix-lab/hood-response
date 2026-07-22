@@ -204,10 +204,14 @@ export class SwapExecutor {
       }
     }
     if (found.length === 0) return null;
-    // Prefer an ETH/WETH-quoted pool; else the last-created one.
-    const pick =
-      found.find((p) => p.ethCurrency === weth || p.ethCurrency === ZeroAddress) ??
-      found[found.length - 1]!;
+    // Only ETH/WETH-paired pools are buyable with a single-hop ETH swap.
+    const ethPaired = found.filter((p) => p.ethCurrency === weth || p.ethCurrency === ZeroAddress);
+    if (ethPaired.length === 0) {
+      throw new Error(
+        `token has a pool but it's not ETH/WETH-paired (vs ${found[0]!.ethCurrency.slice(0, 10)}…) — can't buy with ETH`,
+      );
+    }
+    const pick = ethPaired[ethPaired.length - 1]!;
     logger.info(
       { token, pool: { fee: pick.fee, tickSpacing: pick.tickSpacing, hooks: pick.hooks, eth: pick.ethCurrency }, pools: found.length },
       'sniper: pool resolved from Initialize event',
