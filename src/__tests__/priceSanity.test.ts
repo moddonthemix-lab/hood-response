@@ -39,4 +39,16 @@ describe('checkPriceSanity', () => {
     expect(checkPriceSanity(justInside, 0.00003848)).toBeNull();
     expect(checkPriceSanity(justOutside, 0.00003848)).not.toBeNull();
   });
+
+  it('labels the refusal by action (buy vs sell) so the reason reads correctly either way', () => {
+    const buyErr = checkPriceSanity(0.00003848 * 10, 0.00003848, PRICE_SANITY_MULTIPLE, 'buy');
+    const sellErr = checkPriceSanity(0.00003848 / 10, 0.00003848, PRICE_SANITY_MULTIPLE, 'sell');
+    expect(buyErr).toContain('refusing buy');
+    expect(sellErr).toContain('refusing sell');
+  });
+
+  it('defaults to buy when no action is given', () => {
+    const err = checkPriceSanity(0.00003848 * 10, 0.00003848);
+    expect(err).toContain('refusing buy');
+  });
 });
