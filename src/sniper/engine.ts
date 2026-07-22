@@ -66,6 +66,16 @@ function view(p: Position) {
 export class SniperEngine {
   private readonly positions = new Map<string, Position>();
   private readonly buys: { at: number; eth: number }[] = [];
+  /** Recent buy/skip decisions with reasons — powers the "why didn't it buy?"
+   *  list on the dashboard. Newest is last. */
+  private readonly decisions: {
+    at: number;
+    tokenSymbol: string;
+    kind: string;
+    conviction: number;
+    action: 'bought' | 'skipped';
+    reason: string;
+  }[] = [];
   private timer: NodeJS.Timeout | null = null;
   private warnedUnconfigured = false;
   readonly executor: SwapExecutor;
@@ -108,29 +118,45 @@ export class SniperEngine {
     return false;
   }
 
+  /** Record why the sniper did or didn't act on an alert (newest kept last). */
+  private decide(swarm: Swarm, action: 'bought' | 'skipped', reason: string): void {
+    this.decisions.push({
+      at: Date.now(),
+      tokenSymbol: swarm.tokenSymbol,
+      kind: swarm.kind,
+      conviction: swarm.conviction,
+      action,
+      reason,
+    });
+    if (this.decisions.length > 30) this.decisions.shift();
+    if (action === 'skipped') {
+      logger.info({ token: swarm.tokenSymbol, kind: swarm.kind, conviction: swarm.conviction, reason }, 'sniper: skipped alert');
+    }
+  }
+
   /** Alert hook: decide whether to snipe, and buy if so. */
   async onAlert(swarm: Swarm): Promise<void> {
-    if (!this.settings.enabled) return;
-    if (!config.sniperKinds.has(swarm.kind)) return;
-    if (swarm.conviction < this.settings.minConviction || swarm.conviction > this.settings.maxConviction) return;
-    if (this.holdsOpen(swarm.token)) return; // already in it
+    if (!this.settings.enabled) return this.decide(swarm, 'skipped', 'sniper is OFF');
+    if (!config.sniperKinds.has(swarm.kind)) return this.decide(swarm, 'skipped', `kind ${swarm.kind} not in buy list`);
+    if (swarm.conviction < this.settings.minConviction || swarm.conviction > this.settings.maxConviction)
+      return this.decide(swarm, 'skipped', `conviction ${swarm.conviction} outside ${this.settings.minConviction}-${this.settings.maxConviction}`);
+    if (this.holdsOpen(swarm.token)) return this.decide(swarm, 'skipped', 'already holding this token');
 
     const entryPrice = swarm.priceUsd ?? 0;
-    if (!swarm.priceLive || !(entryPrice > 0)) return; // need a real price to size/track
+    if (!swarm.priceLive || !(entryPrice > 0)) return this.decide(swarm, 'skipped', 'no live price');
 
     if (!this.executor.ready) {
       if (!this.warnedUnconfigured) {
         this.warnedUnconfigured = true;
         logger.warn('sniper is ON but the wallet/router/WETH are not configured — no buys will run');
       }
-      return;
+      return this.decide(swarm, 'skipped', 'wallet not connected');
     }
 
     const now = Date.now();
     const size = this.sizeEth();
     if (this.spentLast24h(now) + size > config.SNIPER_DAILY_CAP_ETH) {
-      logger.warn({ token: swarm.tokenSymbol }, 'sniper: daily spend cap reached, skipping buy');
-      return;
+      return this.decide(swarm, 'skipped', 'daily spend cap reached');
     }
 
     try {
@@ -153,12 +179,15 @@ export class SniperEngine {
         status: 'open',
       };
       this.positions.set(pos.id, pos);
+      this.decide(swarm, 'bought', `bought ${size} Ξ · tx ${res.txHash.slice(0, 10)}`);
       logger.info(
         { token: swarm.tokenSymbol, eth: size, conviction: swarm.conviction, tx: res.txHash },
         'sniper: opened position',
       );
       void this.persist();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.decide(swarm, 'skipped', `buy failed: ${msg.slice(0, 80)}`);
       logger.error({ token: swarm.tokenSymbol, err: String(err) }, 'sniper: buy failed');
     }
   }
@@ -291,6 +320,7 @@ export class SniperEngine {
         realizedPnlEth: round6(realizedPnlEth),
         totalPnlEth: round6(unrealizedPnlEth + realizedPnlEth),
       },
+      decisions: [...this.decisions].reverse(),
       positions,
     };
   }
