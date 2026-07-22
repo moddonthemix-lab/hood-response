@@ -9,6 +9,7 @@ import {
   formatUnits,
   getAddress,
   dataSlice,
+  zeroPadValue,
   concat,
   ZeroAddress,
   MaxUint256,
@@ -24,7 +25,11 @@ import { logger } from '../logger.js';
 const PERMIT2 = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 const V4_QUOTER = '0x8dc178efb8111bb0973dd9d722ebeff267c98f94';
 const POSITION_MANAGER = '0x58daec3116aae6d93017baaea7749052e8a04fa7';
+const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951';
 const STATE_VIEW = '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b';
+// PoolManager.Initialize(id, currency0, currency1, fee, tickSpacing, hooks, sqrtPriceX96, tick)
+// topics: [sig, id, currency0, currency1]; data: fee,tickSpacing,hooks,sqrtPriceX96,tick
+const INIT_TOPIC = '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438';
 const BAGS_HOOK = '0x2380aBf72C17aABAb76480244759AC7E2932EEcC';
 const DYNAMIC_FEE = 0x800000;
 const ADDRESS_THIS = '0x0000000000000000000000000000000000000002'; // UR: the router itself
@@ -154,6 +159,62 @@ export class SwapExecutor {
 
   // ── Pool discovery ──────────────────────────────────────────────────────────
 
+  /** Resolve a pool from the PoolManager's Initialize event (the definitive
+   *  source — every v4 pool emits its full PoolKey at creation). Prefers a pool
+   *  paired with WETH or native ETH when a token has several. */
+  private async resolveFromInitEvent(token: string): Promise<ResolvedPool | null> {
+    if (!this.provider) return null;
+    const t = getAddress(token);
+    const padded = zeroPadValue(t, 32);
+    const weth = getAddress(config.SNIPER_WETH);
+    const base = { address: POOL_MANAGER, fromBlock: 0, toBlock: 'latest' as const };
+    const found: ResolvedPool[] = [];
+    for (const topics of [
+      [INIT_TOPIC, null, padded], // currency0 == token
+      [INIT_TOPIC, null, null, padded], // currency1 == token
+    ]) {
+      let logs;
+      try {
+        logs = await this.provider.getLogs({ ...base, topics });
+      } catch (err) {
+        logger.debug({ token, err: String(err) }, 'sniper: Initialize getLogs failed');
+        continue;
+      }
+      for (const log of logs) {
+        try {
+          const c0 = getAddress(dataSlice(log.topics[2]!, 12));
+          const c1 = getAddress(dataSlice(log.topics[3]!, 12));
+          const decoded = abi.decode(['uint24', 'int24', 'address', 'uint160', 'int24'], log.data);
+          const fee = decoded[0] as bigint;
+          const tickSpacing = decoded[1] as bigint;
+          const hooks = decoded[2] as string;
+          const tokenIs0 = c0.toLowerCase() === t.toLowerCase();
+          found.push({
+            currency0: c0,
+            currency1: c1,
+            fee: Number(fee),
+            tickSpacing: Number(tickSpacing),
+            hooks: getAddress(hooks),
+            ethCurrency: tokenIs0 ? c1 : c0,
+            tokenIs0,
+          });
+        } catch {
+          /* skip malformed log */
+        }
+      }
+    }
+    if (found.length === 0) return null;
+    // Prefer an ETH/WETH-quoted pool; else the last-created one.
+    const pick =
+      found.find((p) => p.ethCurrency === weth || p.ethCurrency === ZeroAddress) ??
+      found[found.length - 1]!;
+    logger.info(
+      { token, pool: { fee: pick.fee, tickSpacing: pick.tickSpacing, hooks: pick.hooks, eth: pick.ethCurrency }, pools: found.length },
+      'sniper: pool resolved from Initialize event',
+    );
+    return pick;
+  }
+
   private buildPool(token: string, eth: string, fee: number, tickSpacing: number, hooks: string): ResolvedPool {
     const t = getAddress(token);
     const c0 = eth.toLowerCase() < t.toLowerCase() ? eth : t;
@@ -183,7 +244,16 @@ export class SwapExecutor {
     const cached = this.pools.get(token.toLowerCase());
     if (cached) return cached;
 
-    // 1) Exact lookup from the on-chain registry via the DexScreener pool id.
+    // 1) Authoritative: the PoolManager's Initialize event carries the full
+    // PoolKey for every pool ever created — works for Bags pools that never
+    // touch the PositionManager registry.
+    const fromEvent = await this.resolveFromInitEvent(token);
+    if (fromEvent) {
+      this.pools.set(token.toLowerCase(), fromEvent);
+      return fromEvent;
+    }
+
+    // 2) Exact lookup from the on-chain registry via the DexScreener pool id.
     if (poolIdHint && /^0x[0-9a-fA-F]{64}$/.test(poolIdHint)) {
       try {
         const posm = new Contract(POSITION_MANAGER, POSM_ABI, this.provider!);
