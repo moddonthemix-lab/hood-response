@@ -69,6 +69,9 @@ function view(p: Position) {
 export class SniperEngine {
   private readonly positions = new Map<string, Position>();
   private readonly buys: { at: number; eth: number }[] = [];
+  /** Last 20 untracked positions (audit trail — the real buy tx / cost basis
+   *  is never lost just because a position was untracked, only when sold). */
+  private readonly removedLog: (Position & { at: number })[] = [];
   /** Recent buy/skip decisions with reasons — powers the "why didn't it buy?"
    *  list on the dashboard. Newest is last. */
   private readonly decisions: {
@@ -261,11 +264,17 @@ export class SniperEngine {
 
   /** Stop tracking a position WITHOUT selling — for clearing a bad/duplicate
    *  import (e.g. one recorded before a metadata fix). The wallet's tokens are
-   *  untouched; re-import to pick it back up correctly. */
+   *  untouched; re-import to pick it back up correctly. The removed record
+   *  (including its buy tx) is kept in a short audit log so an accidental
+   *  Untrack of a REAL bought position never loses the tx hash / cost basis. */
   untrack(id: string): boolean {
-    const ok = this.positions.delete(id);
-    if (ok) void this.persist();
-    return ok;
+    const p = this.positions.get(id);
+    if (!p) return false;
+    this.removedLog.push({ at: Date.now(), ...p });
+    if (this.removedLog.length > 20) this.removedLog.shift();
+    this.positions.delete(id);
+    void this.persist();
+    return true;
   }
 
   /** Set the hot-wallet key at runtime (from the dashboard). Returns the derived
@@ -311,11 +320,19 @@ export class SniperEngine {
    *  ethIn is set to the current sellable value, so PnL tracks from import. */
   async importPosition(token: string): Promise<Position> {
     if (!this.executor.ready) throw new Error('wallet not connected');
-    // Re-importing an already-tracked token replaces the old record instead of
-    // requiring a separate Untrack step first — the common case is fixing a
-    // stale/incomplete import.
+    // Re-importing an already-tracked token replaces the old record — but ONLY
+    // when that record is itself a previous import (buyTx === 'imported').
+    // A REAL bought position (a genuine on-chain buyTx) is never silently
+    // replaced: that would erase the true cost basis and tx hash. Untrack it
+    // explicitly first if you really mean to re-value it as a fresh import.
     for (const [id, p] of this.positions) {
-      if (p.status === 'open' && p.token.toLowerCase() === token.toLowerCase()) this.positions.delete(id);
+      if (p.status !== 'open' || p.token.toLowerCase() !== token.toLowerCase()) continue;
+      if (p.buyTx !== 'imported') {
+        throw new Error(
+          `already tracking a REAL bought position for this token (tx ${p.buyTx.slice(0, 10)}…, ${p.ethIn} Ξ in) — Untrack it first if you really want to replace it with a fresh import`,
+        );
+      }
+      this.positions.delete(id);
     }
     const [{ tokens, ethOut: onChainEthOut }, meta] = await Promise.all([
       this.executor.valueInEth(token, this.price.pairIdOf(token)),
@@ -421,6 +438,7 @@ export class SniperEngine {
         totalPnlEth: round6(unrealizedPnlEth + realizedPnlEth),
       },
       decisions: [...this.decisions].reverse(),
+      removedLog: [...this.removedLog].reverse(),
       positions,
     };
   }

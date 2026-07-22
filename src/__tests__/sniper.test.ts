@@ -166,6 +166,25 @@ describe('SniperEngine', () => {
     expect(snap.positions.filter((p) => p.status === 'open')).toHaveLength(1);
   });
 
+  it('refuses to auto-replace a REAL bought position on re-import (must Untrack first)', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const eng = new SniperEngine(stubPrice(prices, 2000), stubExecutor([]));
+    eng.updateSettings({ enabled: true });
+    await eng.onAlert(swarm()); // a genuine buy, buyTx = '0xbuy' (not 'imported')
+
+    await expect(eng.importPosition('0xtok')).rejects.toThrow(/REAL bought position/);
+
+    // Untrack first, then import succeeds and the audit log keeps the real tx.
+    const id = (await eng.snapshot()).positions[0]!.id;
+    eng.untrack(id);
+    const imported = await eng.importPosition('0xtok');
+    expect(imported.buyTx).toBe('imported');
+
+    const snap = await eng.snapshot();
+    expect(snap.removedLog).toHaveLength(1);
+    expect(snap.removedLog[0]!.buyTx).toBe('0xbuy');
+  });
+
   it('per-position take-profit overrides the global setting', async () => {
     const prices: Record<string, number> = { '0xtok': 1 };
     const eng = new SniperEngine(stubPrice(prices), stubExecutor([]));

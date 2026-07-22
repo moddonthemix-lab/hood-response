@@ -246,7 +246,7 @@ function snPosRow(p,globalTp){
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
   const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
-  const untrack=p.status==='open'?'<button class="snbtn sn-untrack" data-id="'+p.id+'" title="stop tracking without selling (wallet holdings untouched)" style="background:var(--panel2);color:var(--muted);padding:3px 10px;font-size:12px;margin-left:4px">Untrack</button>':'';
+  const untrack=p.status==='open'?'<button class="snbtn sn-untrack" data-id="'+p.id+'" data-sym="'+p.tokenSymbol+'" data-tx="'+p.buyTx+'" data-eth="'+p.ethIn+'" title="stop tracking without selling (wallet holdings untouched)" style="background:var(--panel2);color:var(--muted);padding:3px 10px;font-size:12px;margin-left:4px">Untrack</button>':'';
   const imported=p.buyTx==='imported';
   const tx=imported?'<span title="recovered — no on-chain buy tx, wallet holding was imported">📥 imported</span>'
     :(p.status==='closed'&&p.sellTx?('🔗 '+txLink(p.sellTx)):('🔗 '+txLink(p.buyTx)));
@@ -309,7 +309,8 @@ function renderSniperPanel(d){
     '</div>'+
     '<div class="mono">per-trade cap '+d.caps.perTradeEth+' Ξ · daily cap '+d.caps.dailyEth+' Ξ · spent 24h '+d.caps.spentTodayEth+' Ξ</div>'+
     testRow+
-    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="mono" style="margin-bottom:6px">🧾 Why it did / didn\\'t buy (recent alerts):</div><div id="sn-decisions"><div class="empty">no alerts seen yet</div></div></div>';
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="mono" style="margin-bottom:6px">🧾 Why it did / didn\\'t buy (recent alerts):</div><div id="sn-decisions"><div class="empty">no alerts seen yet</div></div></div>'+
+    '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="mono" style="margin-bottom:6px">🗄️ Recently untracked (tx never lost — for reference/recovery):</div><div id="sn-removed"><div class="empty">nothing untracked yet</div></div></div>';
 
   const saveSettings=async(vals,note)=>{
     const msg=$('sn-saved'); if(msg) msg.textContent='saving…';
@@ -363,6 +364,14 @@ function updateSniperDynamic(d){
       const ok=x.action==='bought'; const col=ok?'var(--green)':'var(--muted)';
       return '<div class="mono" style="padding:2px 0;color:'+col+'">'+(ok?'✅':'⏭️')+' '+x.tokenSymbol+' ('+x.kind+', conv '+x.conviction+') — '+x.reason+'</div>';
     }).join(''); }
+  const re=$('sn-removed');
+  if(re){ const rs=d.removedLog||[];
+    if(!rs.length){ re.innerHTML='<div class="empty">nothing untracked yet</div>'; }
+    else re.innerHTML=rs.slice(0,10).map(x=>{
+      const real=x.buyTx!=='imported';
+      const txPart=real?txLink(x.buyTx):'imported';
+      return '<div class="mono" style="padding:2px 0;color:'+(real?'var(--accent)':'var(--muted)')+'">'+x.tokenSymbol+' — '+x.ethIn+' Ξ — 🔗 '+txPart+'</div>';
+    }).join(''); }
   const el=$('sniper-positions'); el.innerHTML='';
   const ps=d.positions||[];
   const globalTp=(d.settings&&d.settings.takeProfitPct)||0;
@@ -390,7 +399,11 @@ function updateSniperDynamic(d){
     await loadSniper(false);
   });
   el.querySelectorAll('.sn-untrack').forEach(b=>b.onclick=async()=>{
-    if(!confirm('Stop tracking this position? (wallet holdings are NOT sold, you can re-import)')) return;
+    const isReal=b.dataset.tx!=='imported';
+    const warn=isReal
+      ? ('⚠️ This is a REAL bought position (tx '+b.dataset.tx.slice(0,10)+'…, '+b.dataset.eth+' Ξ in). Untracking it does NOT sell — wallet holdings are untouched — but the bot forgets the true entry/cost until you re-import (which re-values at current price, not your original cost). Continue?')
+      : ('Stop tracking '+b.dataset.sym+'? (wallet holdings are NOT sold, you can re-import)');
+    if(!confirm(warn)) return;
     b.disabled=true;
     await fetch('/api/sniper/position/'+b.dataset.id,{method:'DELETE',headers:adminHeaders()});
     await loadSniper(false);
