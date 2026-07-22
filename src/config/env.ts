@@ -151,9 +151,11 @@ const schema = z.object({
   // lose, never your main wallet. It won't trade unless the key + router + WETH
   // are set. Per-trade + daily caps and the off switch are the safety rails.
   SNIPER_ENABLED: bool(false), // master on/off — ON = real buys
-  SNIPER_PRIVATE_KEY: z.string().default(''), // burner hot-wallet key (Railway env only)
-  SNIPER_ROUTER: z.string().default(''), // Uniswap-V2-style DEX router (MUST verify)
-  SNIPER_WETH: z.string().default(''), // wrapped-native address for the swap path
+  SNIPER_PRIVATE_KEY: z.string().default(''), // burner hot-wallet key (env OR entered in-app)
+  // Robinhood Chain Uniswap-v4 addresses (verified from official docs). The
+  // UniversalRouter is Robinhood's MODIFIED fork — only this address works.
+  SNIPER_ROUTER: z.string().default('0x8876789976deCbfCbBbe364623c63652db8C0904'),
+  SNIPER_WETH: z.string().default('0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'),
   SNIPER_MIN_CONVICTION: num(60),
   SNIPER_MAX_CONVICTION: num(100),
   SNIPER_BUY_ETH: num(0.0005), // per-alert buy size
