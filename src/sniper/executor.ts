@@ -51,6 +51,8 @@ const QUOTER_ABI = [
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)',
+  'function totalSupply() view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ];
@@ -391,6 +393,21 @@ export class SwapExecutor {
       /* balance read failed — tx still landed */
     }
     return { txHash: tx.hash, tokensReceived, ethSpent: ethAmount };
+  }
+
+  /** Read the token's real symbol + total supply straight from the contract —
+   *  used so an imported/recovered position shows its actual name, not a
+   *  placeholder. */
+  async tokenMeta(token: string): Promise<{ symbol: string; totalSupply: number }> {
+    this.init();
+    if (!this.wallet) throw new Error('sniper wallet not configured');
+    const token20 = new Contract(token, ERC20_ABI, this.wallet);
+    const [symbol, decimals, supply] = await Promise.all([
+      token20.getFunction('symbol')() as Promise<string>,
+      token20.getFunction('decimals')() as Promise<bigint>,
+      token20.getFunction('totalSupply')() as Promise<bigint>,
+    ]);
+    return { symbol, totalSupply: Number(formatUnits(supply, Number(decimals))) };
   }
 
   /** Current sellable value of the wallet's balance of `token`, in ETH, plus

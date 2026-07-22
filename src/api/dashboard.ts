@@ -246,12 +246,13 @@ function snPosRow(p){
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
   const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
+  const untrack=p.status==='open'?'<button class="snbtn sn-untrack" data-id="'+p.id+'" title="stop tracking without selling (wallet holdings untouched)" style="background:var(--panel2);color:var(--muted);padding:3px 10px;font-size:12px;margin-left:4px">Untrack</button>':'';
   const tx=p.status==='closed'&&p.sellTx?('🔗 '+txLink(p.sellTx)):('🔗 '+txLink(p.buyTx));
   d.innerHTML=st+'<span class="tag" style="background:#12283a;color:var(--accent)">'+p.conviction+'</span>'+
     '<span class="sym">'+dexLink(p.token,p.tokenSymbol)+'</span>'+
     '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC · '+tx+'</span>'+
     '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
-    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell;
+    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell+untrack;
   return d;
 }
 // Rebuild the settings/wallet/test form. Called only on open + after an action
@@ -355,6 +356,12 @@ function updateSniperDynamic(d){
     b.disabled=true; b.textContent='selling…';
     const r=await fetch('/api/sniper/sell/'+b.dataset.id,{method:'POST',headers:adminHeaders()});
     if(!r.ok){ const j=await r.json().catch(()=>({})); alert('Sell failed: '+(j.error||'error')); }
+    await loadSniper(false);
+  });
+  el.querySelectorAll('.sn-untrack').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Stop tracking this position? (wallet holdings are NOT sold, you can re-import)')) return;
+    b.disabled=true;
+    await fetch('/api/sniper/position/'+b.dataset.id,{method:'DELETE',headers:adminHeaders()});
     await loadSniper(false);
   });
 }
