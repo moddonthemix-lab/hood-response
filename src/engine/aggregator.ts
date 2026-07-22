@@ -203,6 +203,7 @@ export class Aggregator {
       walletCount: wallets.length,
       wallets,
       walletSummary: summarizeWallets(walletObjs, wallets.length),
+      walletLabels: walletObjs.map((w) => w.label),
       alsoHold: crossHoldings(walletObjs, token.symbol),
       totalUsd,
       marketCap,

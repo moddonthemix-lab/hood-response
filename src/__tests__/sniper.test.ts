@@ -74,6 +74,7 @@ function swarm(over: Partial<Swarm> = {}): Swarm {
     walletCount: 3,
     wallets: [],
     walletSummary: '3 alpha',
+    walletLabels: [],
     totalUsd: 3000,
     marketCap: 60_000,
     newToken: false,

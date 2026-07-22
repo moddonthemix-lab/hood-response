@@ -19,12 +19,16 @@ export interface TrackedCall {
   conviction: number;
   walletCount: number;
   walletSummary: string;
+  /** Labels of the tracked wallets behind this call (e.g. ["tendies", "hmm"]). */
+  walletLabels: string[];
   /** Distinct-wallet repeat signal at alert time (from the repeat counter). */
   repeatCount: number;
   repeatWallets: number;
   newHolder: boolean;
   entryPrice: number;
   entryMarketCap: number;
+  /** Age of the token's DEX pair (hours) at alert time, or null if unknown. */
+  pairAgeHours: number | null;
   entryAt: number;
   lastPrice: number;
   /** Live market cap now (derived from the price move), for display. */
@@ -74,6 +78,16 @@ function marketCapBand(mc: number): string {
   return '2M+';
 }
 const MARKETCAP_BANDS = ['<50K', '50K-150K', '150K-500K', '500K-2M', '2M+'];
+
+function tokenAgeBand(hours: number | null): string {
+  if (hours == null) return 'unknown';
+  if (hours < 1) return '<1h';
+  if (hours < 6) return '1-6h';
+  if (hours < 24) return '6-24h';
+  if (hours < 168) return '1-7d';
+  return '7d+';
+}
+const TOKEN_AGE_BANDS = ['<1h', '1-6h', '6-24h', '1-7d', '7d+', 'unknown'];
 
 /** Offset (minutes, e.g. -300) of `tz` at `at`, derived from Intl's short GMT
  *  offset — handles daylight saving without a date library. */
@@ -158,11 +172,13 @@ export class PerformanceTracker {
       conviction: swarm.conviction,
       walletCount: swarm.walletCount,
       walletSummary: swarm.walletSummary,
+      walletLabels: swarm.walletLabels,
       repeatCount: swarm.repeatCount ?? 1,
       repeatWallets: swarm.repeatWallets ?? swarm.walletCount,
       newHolder: swarm.repeatNewWallet ?? false,
       entryPrice,
       entryMarketCap: swarm.marketCap,
+      pairAgeHours: swarm.pairAgeHours ?? null,
       entryAt: now,
       lastPrice: entryPrice,
       lastMarketCap: swarm.marketCap,
@@ -329,6 +345,8 @@ export class PerformanceTracker {
     byKind: Bucket[];
     byConviction: Bucket[];
     byMarketCap: Bucket[];
+    byTokenAge: Bucket[];
+    byWallet: Bucket[];
   } {
     const all = [...this.calls.values()];
     const win = config.PERF_WIN_THRESHOLD_PCT;
@@ -337,6 +355,16 @@ export class PerformanceTracker {
     const repeat = all.filter((c) => c.repeatCount >= 2);
     const single = all.filter((c) => c.repeatCount < 2);
     const kinds: SwarmKind[] = ['BUY', 'SELL', 'ROTATION', 'SOLO', 'ENTRY'];
+
+    // Not mutually exclusive: a call with 2+ wallets counts in EACH of its
+    // wallets' buckets, so "which named wallet actually calls winners" is
+    // visible per-wallet rather than only as an aggregate wallet-count stat.
+    const wallets = new Set<string>();
+    for (const c of all) for (const w of c.walletLabels) wallets.add(w);
+    const byWallet = [...wallets]
+      .map((w) => bucket(w, all.filter((c) => c.walletLabels.includes(w)), win))
+      .sort((a, b) => b.count - a.count);
+
     return {
       total: all.length,
       winThresholdPct: win,
@@ -355,6 +383,10 @@ export class PerformanceTracker {
       byMarketCap: MARKETCAP_BANDS.map((label) =>
         bucket(label, all.filter((c) => marketCapBand(c.entryMarketCap) === label), win),
       ),
+      byTokenAge: TOKEN_AGE_BANDS.map((label) =>
+        bucket(label, all.filter((c) => tokenAgeBand(c.pairAgeHours) === label), win),
+      ),
+      byWallet,
     };
   }
 

@@ -375,14 +375,15 @@ export async function buildServer(
   // outcome data lives in memory and resets when the process restarts.
   app.get('/api/performance.csv', async (_req, reply) => {
     const cols = [
-      'symbol', 'kind', 'walletCount', 'repeatCount', 'repeatWallets', 'newHolder',
-      'conviction', 'entryMarketCap', 'entryAt', 'maxGainPct', 'lastGainPct',
+      'symbol', 'kind', 'walletCount', 'walletLabels', 'repeatCount', 'repeatWallets', 'newHolder',
+      'conviction', 'entryMarketCap', 'pairAgeHours', 'entryAt', 'maxGainPct', 'lastGainPct',
       'gain1hPct', 'gain6hPct', 'gain24hPct', 'token',
     ];
     const rows = (performance?.list() ?? []).map((c) =>
       [
-        c.tokenSymbol, c.kind, c.walletCount, c.repeatCount, c.repeatWallets, c.newHolder,
-        c.conviction, c.entryMarketCap, new Date(c.entryAt).toISOString(), c.maxGainPct,
+        c.tokenSymbol, c.kind, c.walletCount, c.walletLabels.join('|'), c.repeatCount,
+        c.repeatWallets, c.newHolder, c.conviction, c.entryMarketCap, c.pairAgeHours ?? '',
+        new Date(c.entryAt).toISOString(), c.maxGainPct,
         c.lastGainPct, c.gain1hPct ?? '', c.gain6hPct ?? '', c.gain24hPct ?? '', c.token,
       ]
         .map((v) => (typeof v === 'string' && v.includes(',') ? `"${v}"` : String(v)))
@@ -420,6 +421,7 @@ export async function buildServer(
       walletCount: 3,
       wallets: [],
       walletSummary: '2 alpha · 1 beta',
+      walletLabels: ['tendies', 'hmm'],
       totalUsd: 4200,
       marketCap: 68_000,
       newToken: false,
