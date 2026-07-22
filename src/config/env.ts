@@ -136,6 +136,12 @@ const schema = z.object({
   // it at a mounted Railway Volume (e.g. /data/performance.json); empty = keep
   // data in memory only (lost on restart).
   PERF_STORE_PATH: z.string().default(''),
+  // Clear the Best Calls tracker once a day so it doesn't grow stale — fresh
+  // start every morning. Also triggerable on demand via the admin Reset button
+  // (POST /api/performance/reset).
+  PERF_AUTO_RESET: bool(true),
+  PERF_RESET_HOUR: num(8),
+  PERF_RESET_TZ: z.string().default('America/New_York'),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"

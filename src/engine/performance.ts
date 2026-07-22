@@ -57,6 +57,57 @@ interface Bucket {
 const gainPct = (entry: number, now: number): number =>
   entry > 0 ? Math.round(((now - entry) / entry) * 1000) / 10 : 0;
 
+function convictionBand(c: number): string {
+  if (c < 60) return '<60';
+  if (c < 70) return '60-69';
+  if (c < 80) return '70-79';
+  if (c < 90) return '80-89';
+  return '90-100';
+}
+const CONVICTION_BANDS = ['<60', '60-69', '70-79', '80-89', '90-100'];
+
+function marketCapBand(mc: number): string {
+  if (mc < 50_000) return '<50K';
+  if (mc < 150_000) return '50K-150K';
+  if (mc < 500_000) return '150K-500K';
+  if (mc < 2_000_000) return '500K-2M';
+  return '2M+';
+}
+const MARKETCAP_BANDS = ['<50K', '50K-150K', '150K-500K', '500K-2M', '2M+'];
+
+/** Offset (minutes, e.g. -300) of `tz` at `at`, derived from Intl's short GMT
+ *  offset — handles daylight saving without a date library. */
+function tzOffsetMinutes(tz: string, at: Date): number {
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
+    .formatToParts(at)
+    .find((p) => p.type === 'timeZoneName')?.value;
+  const m = /GMT([+-]\d+)(?::(\d+))?/.exec(part ?? '');
+  if (!m) return 0;
+  const sign = m[1]!.startsWith('-') ? -1 : 1;
+  return sign * (Math.abs(Number(m[1])) * 60 + Number(m[2] ?? 0));
+}
+
+/** Ms until the next wall-clock `hour`:00:00 in `tz` (tomorrow if already past
+ *  today). Self-correcting across DST since the offset is recomputed each call. */
+function msUntilNextLocalHour(tz: string, hour: number): number {
+  const now = new Date();
+  const ymd = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .formatToParts(now)
+    .reduce<Record<string, number>>((acc, p) => {
+      if (p.type === 'year' || p.type === 'month' || p.type === 'day') acc[p.type] = Number(p.value);
+      return acc;
+    }, {});
+  const offsetMin = tzOffsetMinutes(tz, now);
+  let target = Date.UTC(ymd.year!, ymd.month! - 1, ymd.day!, hour, 0, 0) - offsetMin * 60_000;
+  if (target <= now.getTime()) target += 24 * 3_600_000;
+  return target - now.getTime();
+}
+
 function bucket(label: string, calls: TrackedCall[], winThreshold: number): Bucket {
   if (calls.length === 0) {
     return { label, count: 0, avgMaxGainPct: 0, medianMaxGainPct: 0, bestMaxGainPct: 0, winRatePct: 0 };
@@ -87,6 +138,7 @@ export class PerformanceTracker {
   private readonly calls = new Map<string, TrackedCall>();
   private timer: NodeJS.Timeout | null = null;
   private soonTimer: NodeJS.Timeout | null = null;
+  private resetTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly price: PriceOracle) {}
 
@@ -141,6 +193,28 @@ export class PerformanceTracker {
       { sampleMinutes: config.PERF_SAMPLE_MINUTES, trackHours: config.PERF_TRACK_HOURS },
       'performance tracker: following alert outcomes',
     );
+    this.scheduleReset();
+  }
+
+  /** Clear every tracked call (open + closed) and persist the empty state.
+   *  Used by both the daily auto-reset and the admin's manual Reset button. */
+  reset(): void {
+    this.calls.clear();
+    void this.persist();
+    logger.info('performance: Best Calls list reset');
+  }
+
+  private scheduleReset(): void {
+    if (!config.PERFORMANCE_TRACKING || !config.PERF_AUTO_RESET) return;
+    const ms = msUntilNextLocalHour(config.PERF_RESET_TZ, config.PERF_RESET_HOUR);
+    this.resetTimer = setTimeout(() => {
+      this.reset();
+      this.scheduleReset();
+    }, ms);
+    logger.info(
+      { tz: config.PERF_RESET_TZ, hour: config.PERF_RESET_HOUR, inMinutes: Math.round(ms / 60_000) },
+      'performance: next daily reset scheduled',
+    );
   }
 
   /** Sample once shortly (used right after a burst of alerts so the card
@@ -157,8 +231,10 @@ export class PerformanceTracker {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.soonTimer) clearTimeout(this.soonTimer);
+    if (this.resetTimer) clearTimeout(this.resetTimer);
     this.timer = null;
     this.soonTimer = null;
+    this.resetTimer = null;
   }
 
   private async sample(): Promise<void> {
@@ -245,7 +321,15 @@ export class PerformanceTracker {
   }
 
   /** Aggregate outcomes by the dimensions that matter for catching runners. */
-  summary(): { total: number; winThresholdPct: number; byWalletCount: Bucket[]; byRepeat: Bucket[]; byKind: Bucket[] } {
+  summary(): {
+    total: number;
+    winThresholdPct: number;
+    byWalletCount: Bucket[];
+    byRepeat: Bucket[];
+    byKind: Bucket[];
+    byConviction: Bucket[];
+    byMarketCap: Bucket[];
+  } {
     const all = [...this.calls.values()];
     const win = config.PERF_WIN_THRESHOLD_PCT;
     const multi = all.filter((c) => c.walletCount >= 2);
@@ -265,6 +349,17 @@ export class PerformanceTracker {
         bucket('single alert', single, win),
       ],
       byKind: kinds.map((k) => bucket(k, all.filter((c) => c.kind === k), win)),
+      byConviction: CONVICTION_BANDS.map((label) =>
+        bucket(label, all.filter((c) => convictionBand(c.conviction) === label), win),
+      ),
+      byMarketCap: MARKETCAP_BANDS.map((label) =>
+        bucket(label, all.filter((c) => marketCapBand(c.entryMarketCap) === label), win),
+      ),
     };
+  }
+
+  /** Info for the dashboard: when the next auto-reset fires (or null if off). */
+  resetInfo(): { enabled: boolean; hour: number; tz: string } {
+    return { enabled: config.PERF_AUTO_RESET, hour: config.PERF_RESET_HOUR, tz: config.PERF_RESET_TZ };
   }
 }
