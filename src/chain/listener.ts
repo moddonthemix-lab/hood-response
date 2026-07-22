@@ -437,7 +437,11 @@ export class HttpPollingChainListener implements ChainListener {
 
       const seen = new Set<string>();
       let hits = 0;
-      for (const log of [...(buys ?? []), ...(sells ?? [])]) {
+      // A well-behaved node returns an array from eth_getLogs, but some RPCs /
+      // proxies can return a non-array result (e.g. {}). Coerce defensively so a
+      // bad response never throws "{} is not iterable" and kills the poll loop.
+      const logs = [buys, sells].flatMap((v) => (Array.isArray(v) ? (v as EthLog[]) : []));
+      for (const log of logs) {
         const key = `${log.transactionHash}:${(log as { logIndex?: string }).logIndex}`;
         if (seen.has(key)) continue;
         seen.add(key);

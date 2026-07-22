@@ -184,9 +184,10 @@ export async function buildServer(
 
   // ── Performance / outcomes ─────────────────────────────────────────────────────
   app.get('/api/performance', async (req) => {
-    if (!performance) return { enabled: false, calls: [], summary: null };
+    const persist = { enabled: config.PERF_STORE_PATH.length > 0, path: config.PERF_STORE_PATH || null };
+    if (!performance) return { enabled: false, persist, calls: [], summary: null };
     const limit = clampLimit((req.query as { limit?: string }).limit);
-    return { enabled: true, summary: performance.summary(), calls: performance.list().slice(0, limit) };
+    return { enabled: true, persist, summary: performance.summary(), calls: performance.list().slice(0, limit) };
   });
 
   // CSV snapshot of every tracked call — grab this before a redeploy, since the
