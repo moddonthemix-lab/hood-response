@@ -275,7 +275,9 @@ export class SniperEngine {
   }
 
   private async closePosition(p: Position, reason: 'take-profit' | 'manual'): Promise<void> {
-    const res = await this.executor.sell(p.token, this.price.pairIdOf(p.token));
+    const ethUsd = this.price.ethUsdPrice();
+    const expectedPriceEth = p.lastPriceUsd > 0 && ethUsd && ethUsd > 0 ? p.lastPriceUsd / ethUsd : null;
+    const res = await this.executor.sell(p.token, this.price.pairIdOf(p.token), expectedPriceEth);
     p.status = 'closed';
     p.closedAt = Date.now();
     p.sellTx = res.txHash;

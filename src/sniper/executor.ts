@@ -76,6 +76,34 @@ const STATE_VIEW_ABI = [
   'function getLiquidity(bytes32 poolId) view returns (uint128 liquidity)',
 ];
 
+// ── Uniswap V3 (genuine, unmodified Uniswap deployment) ────────────────────────
+// Some tokens' real liquidity lives on V3, not V4 — V4-only routing can silently
+// resolve a near-empty V4 pool (see PRICE_SANITY_MULTIPLE below) while missing
+// the actual deep pool entirely. These three addresses are verified on-chain,
+// not assumed: the factory is read directly from a known-liquid V3 pool's own
+// factory() getter; the router/quoter are matched by calling factory() /
+// WETH9() on every "SwapRouter02"/"QuoterV2" contract on this chain and keeping
+// only the one whose factory() equals that same address (this chain has many
+// unrelated token-specific clones of both names, so name matching alone is not
+// safe) — then cross-checked by confirming Factory.getPool() for a known pool
+// returns that pool's real address, and the quote it gives is in the right
+// ballpark of the token's live DexScreener price.
+const V3_FACTORY = '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA';
+const V3_ROUTER = '0xCaf681a66D020601342297493863E78C959E5cb2'; // SwapRouter02
+const V3_QUOTER = '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7'; // QuoterV2
+const V3_FEE_TIERS = [500, 3000, 10000, 100]; // 0.05% / 0.3% / 1% / 0.01%
+
+const V3_FACTORY_ABI = ['function getPool(address, address, uint24) view returns (address)'];
+const V3_POOL_ABI = ['function liquidity() view returns (uint128)'];
+const V3_QUOTER_ABI = [
+  'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+];
+const V3_ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountOut)',
+  'function multicall(bytes[] data) payable returns (bytes[] results)',
+  'function unwrapWETH9(uint256 amountMinimum, address recipient) payable',
+];
+
 export interface BuyResult {
   txHash: string;
   tokensReceived: number;
@@ -126,17 +154,20 @@ function shortErr(err: unknown): string {
 export const PRICE_SANITY_MULTIPLE = 3;
 
 /** Null when the quote is within tolerance of the expected market price;
- *  otherwise a human-readable reason to refuse the buy. Pulled out as a pure
- *  function so the exact boundary math is unit-testable without ethers. */
+ *  otherwise a human-readable reason to refuse the trade. Pulled out as a pure
+ *  function so the exact boundary math is unit-testable without ethers. Used
+ *  for both buys (quote too expensive) and sells (quote pays out too little)
+ *  — the same "this pool is bad" signal either direction. */
 export function checkPriceSanity(
   quotedPriceEth: number,
   expectedPriceEth: number,
   maxMultiple: number = PRICE_SANITY_MULTIPLE,
+  action: 'buy' | 'sell' = 'buy',
 ): string | null {
   const ratio = quotedPriceEth / expectedPriceEth;
   if (ratio <= maxMultiple && ratio >= 1 / maxMultiple) return null;
   const off = ratio >= 1 ? `${ratio.toFixed(1)}x higher` : `${(1 / ratio).toFixed(1)}x lower`;
-  return `quoted price is ${off} than market — refusing buy (likely a bad/decoy pool)`;
+  return `quoted price is ${off} than market — refusing ${action} (likely a bad/decoy pool)`;
 }
 
 const keyTuple = (p: ResolvedPool) =>
@@ -148,16 +179,22 @@ const poolIdOf = (p: ResolvedPool): string =>
   );
 
 /**
- * Executes ETH↔token swaps on Robinhood Chain through the modified v4
- * UniversalRouter. Each token's PoolKey is RESOLVED on-chain (DexScreener pool
- * id → PositionManager registry, else candidate probing via StateView), so we
- * trade the pool that actually exists instead of assuming its parameters.
+ * Executes ETH↔token swaps on Robinhood Chain. Tries the modified v4
+ * UniversalRouter first (each token's PoolKey RESOLVED on-chain — DexScreener
+ * pool id → PositionManager registry, else candidate probing via StateView —
+ * so we trade the pool that actually exists instead of assuming its
+ * parameters). Some tokens' real liquidity lives on plain Uniswap V3 instead;
+ * when v4 has no pool, or the best pool it finds prices wildly off the token's
+ * known market price (see PRICE_SANITY_MULTIPLE), falls back to v3 rather
+ * than execute into — or get stuck unable to exit — a bad v4 pool.
  */
 export class SwapExecutor {
   private provider: JsonRpcProvider | null = null;
   private wallet: Wallet | null = null;
   private runtimeKey: string | null = null;
   private readonly pools = new Map<string, ResolvedPool>();
+  /** token → its best v3 fee tier, or null when no v3 pool exists at all. */
+  private readonly v3Pools = new Map<string, { fee: number } | null>();
 
   private key(): string {
     return this.runtimeKey ?? config.SNIPER_PRIVATE_KEY;
@@ -320,9 +357,15 @@ export class SwapExecutor {
     token: string,
     poolIdHint?: string | null,
   ): Promise<{ hook: string; feePctPerSwap: number | null }> {
-    const pool = await this.resolvePool(token, poolIdHint);
-    const isBags = pool.hooks.toLowerCase() === BAGS_HOOK.toLowerCase();
-    return { hook: pool.hooks, feePctPerSwap: isBags ? BAGS_HOOK_FEE_PCT : null };
+    try {
+      const pool = await this.resolvePool(token, poolIdHint);
+      const isBags = pool.hooks.toLowerCase() === BAGS_HOOK.toLowerCase();
+      return { hook: pool.hooks, feePctPerSwap: isBags ? BAGS_HOOK_FEE_PCT : null };
+    } catch (v4Err) {
+      const v3 = await this.resolveV3Pool(token);
+      if (!v3) throw v4Err;
+      return { hook: 'uniswap-v3', feePctPerSwap: null };
+    }
   }
 
   private async resolvePool(token: string, poolIdHint?: string | null): Promise<ResolvedPool> {
@@ -389,6 +432,53 @@ export class SwapExecutor {
     throw new Error('no initialized v4 pool found for this token');
   }
 
+  /** Find the token's deepest ETH-paired v3 pool across the standard fee
+   *  tiers (by actual on-chain liquidity, same reasoning as deepestPool for
+   *  v4), or null if it has none. Cached for the process lifetime like v4. */
+  private async resolveV3Pool(token: string): Promise<{ fee: number } | null> {
+    const key = token.toLowerCase();
+    if (this.v3Pools.has(key)) return this.v3Pools.get(key)!;
+    const weth = getAddress(config.SNIPER_WETH);
+    const t = getAddress(token);
+    const factory = new Contract(V3_FACTORY, V3_FACTORY_ABI, this.provider!);
+    let best: { fee: number; liquidity: bigint } | null = null;
+    for (const fee of V3_FEE_TIERS) {
+      try {
+        const poolAddr = (await factory.getFunction('getPool')(t, weth, fee)) as string;
+        if (!poolAddr || poolAddr === ZeroAddress) continue;
+        const poolContract = new Contract(poolAddr, V3_POOL_ABI, this.provider!);
+        const liq = (await poolContract.getFunction('liquidity')()) as bigint;
+        if (liq > 0n && (!best || liq > best.liquidity)) best = { fee, liquidity: liq };
+      } catch {
+        /* this fee tier's pool doesn't exist or isn't readable — skip */
+      }
+    }
+    const result = best ? { fee: best.fee } : null;
+    this.v3Pools.set(key, result);
+    if (result) logger.info({ token, fee: result.fee }, 'sniper: v3 pool resolved');
+    return result;
+  }
+
+  /** V3 quote via QuoterV2 (not view — must be staticCall'd, same as v4's quoter). */
+  private async quoteV3(tokenIn: string, tokenOut: string, fee: number, amountIn: bigint): Promise<bigint> {
+    const quoter = new Contract(V3_QUOTER, V3_QUOTER_ABI, this.wallet!);
+    const fn = (quoter.getFunction('quoteExactInputSingle') as unknown as {
+      staticCall: (params: unknown) => Promise<[bigint, bigint, number, bigint]>;
+    }).staticCall;
+    const [amountOut] = await fn([tokenIn, tokenOut, amountIn, fee, 0n]);
+    return amountOut;
+  }
+
+  /** Standard ERC-20 approve (v3's SwapRouter02 pulls via transferFrom, not
+   *  Permit2) — approve once for max so repeat sells don't re-approve. */
+  private async ensureErc20Approval(token: string, spender: string, amount: bigint): Promise<void> {
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const allowance = (await token20.getFunction('allowance')(this.wallet!.address, spender)) as bigint;
+    if (allowance < amount) {
+      await (await token20.getFunction('approve')(spender, MaxUint256)).wait(1);
+    }
+  }
+
   // ── Quotes ──────────────────────────────────────────────────────────────────
 
   /** Quote amount-out for an exact amount-in. `ethIn` = ETH→token direction. */
@@ -417,6 +507,12 @@ export class SwapExecutor {
 
   // ── Trades ──────────────────────────────────────────────────────────────────
 
+  /** Buy `ethAmount` ETH worth of `token`. Tries v4 first; if v4 has no pool,
+   *  or the best one it finds prices wildly off `expectedPriceEth` (the
+   *  alert's own known market price), falls back to v3 rather than execute
+   *  into — or simply fail on — a bad v4 pool. No ETH is spent on a v4 attempt
+   *  that gets refused before broadcasting; a v4 attempt that reverts
+   *  on-chain does spend gas before the v3 fallback runs. */
   async buy(
     token: string,
     ethAmount: number,
@@ -425,9 +521,25 @@ export class SwapExecutor {
   ): Promise<BuyResult> {
     this.init();
     if (!this.wallet) throw new Error('sniper wallet not configured');
+    try {
+      return await this.buyV4(token, ethAmount, poolIdHint, expectedPriceEth);
+    } catch (v4Err) {
+      const v3 = await this.resolveV3Pool(token);
+      if (!v3) throw v4Err;
+      logger.warn({ token, v4Err: shortErr(v4Err), fee: v3.fee }, 'sniper: v4 buy unavailable, trying v3');
+      return await this.buyV3(token, ethAmount, expectedPriceEth, v3.fee);
+    }
+  }
+
+  private async buyV4(
+    token: string,
+    ethAmount: number,
+    poolIdHint: string | null | undefined,
+    expectedPriceEth: number | null | undefined,
+  ): Promise<BuyResult> {
     const pool = await this.resolvePool(token, poolIdHint);
     const amountIn = parseEther(ethAmount.toString());
-    const token20 = new Contract(token, ERC20_ABI, this.wallet);
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
     const decimals = Number((await token20.getFunction('decimals')()) as bigint);
 
     let quoted: bigint;
@@ -440,7 +552,7 @@ export class SwapExecutor {
 
     if (expectedPriceEth != null && expectedPriceEth > 0) {
       const quotedPriceEth = Number(formatEther(amountIn)) / Number(formatUnits(quoted, decimals));
-      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE);
+      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE, 'buy');
       if (sanityErr) throw new Error(sanityErr);
     }
 
@@ -463,9 +575,9 @@ export class SwapExecutor {
       ? [v4Input]
       : [abi.encode(['address', 'uint256'], [ADDRESS_THIS, amountIn]), v4Input];
 
-    const before = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
+    const before = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
 
-    const router = new Contract(config.SNIPER_ROUTER, ROUTER_ABI, this.wallet);
+    const router = new Contract(config.SNIPER_ROUTER, ROUTER_ABI, this.wallet!);
     const deadline = Math.floor(Date.now() / 1000) + 120;
     let tx;
     try {
@@ -473,12 +585,63 @@ export class SwapExecutor {
     } catch (err) {
       throw new Error(`swap reverted (${shortErr(err)})`);
     }
-    logger.info({ token, ethAmount, tx: tx.hash }, 'sniper: buy sent');
+    logger.info({ token, ethAmount, tx: tx.hash, venue: 'v4' }, 'sniper: buy sent');
     const receipt = await tx.wait(1);
 
     let tokensReceived = 0;
     try {
-      const after = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
+      const after = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
+      tokensReceived = Number(formatUnits(after - before, decimals));
+    } catch {
+      /* balance read failed — tx still landed */
+    }
+    const gasEth = receipt ? gasCostEth(receipt) : 0;
+    return { txHash: tx.hash, tokensReceived, ethSpent: ethAmount, gasEth };
+  }
+
+  private async buyV3(
+    token: string,
+    ethAmount: number,
+    expectedPriceEth: number | null | undefined,
+    fee: number,
+  ): Promise<BuyResult> {
+    const weth = getAddress(config.SNIPER_WETH);
+    const t = getAddress(token);
+    const amountIn = parseEther(ethAmount.toString());
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const decimals = Number((await token20.getFunction('decimals')()) as bigint);
+
+    let quoted: bigint;
+    try {
+      quoted = await this.quoteV3(weth, t, fee, amountIn);
+    } catch (err) {
+      throw new Error(`v3 quote reverted (${shortErr(err)})`);
+    }
+    if (quoted <= 0n) throw new Error('no v3 route (zero quote)');
+
+    if (expectedPriceEth != null && expectedPriceEth > 0) {
+      const quotedPriceEth = Number(formatEther(amountIn)) / Number(formatUnits(quoted, decimals));
+      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE, 'buy');
+      if (sanityErr) throw new Error(`v3: ${sanityErr}`);
+    }
+
+    const amountOutMin = this.minOut(quoted);
+    const router = new Contract(V3_ROUTER, V3_ROUTER_ABI, this.wallet!);
+    const params = [weth, t, fee, this.wallet!.address, amountIn, amountOutMin, 0n];
+
+    const before = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
+    let tx;
+    try {
+      tx = await router.getFunction('exactInputSingle')(params, { value: amountIn });
+    } catch (err) {
+      throw new Error(`v3 swap reverted (${shortErr(err)})`);
+    }
+    logger.info({ token, ethAmount, tx: tx.hash, venue: 'v3', fee }, 'sniper: buy sent');
+    const receipt = await tx.wait(1);
+
+    let tokensReceived = 0;
+    try {
+      const after = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
       tokensReceived = Number(formatUnits(after - before, decimals));
     } catch {
       /* balance read failed — tx still landed */
@@ -549,9 +712,22 @@ export class SwapExecutor {
   async valueInEth(token: string, poolIdHint?: string | null): Promise<{ tokens: number; ethOut: number }> {
     this.init();
     if (!this.wallet) throw new Error('sniper wallet not configured');
+    try {
+      return await this.valueInEthV4(token, poolIdHint);
+    } catch (v4Err) {
+      const v3 = await this.resolveV3Pool(token);
+      if (!v3) throw v4Err;
+      return await this.valueInEthV3(token, v3.fee);
+    }
+  }
+
+  private async valueInEthV4(
+    token: string,
+    poolIdHint: string | null | undefined,
+  ): Promise<{ tokens: number; ethOut: number }> {
     const pool = await this.resolvePool(token, poolIdHint);
-    const token20 = new Contract(token, ERC20_ABI, this.wallet);
-    const bal = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const bal = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
     if (bal <= 0n) throw new Error('wallet holds none of this token');
     const decimals = Number((await token20.getFunction('decimals')()) as bigint);
     let out = 0n;
@@ -559,6 +735,22 @@ export class SwapExecutor {
       out = await this.quoteOut(pool, bal, false);
     } catch (err) {
       throw new Error(`quote failed (${shortErr(err)})`);
+    }
+    return { tokens: Number(formatUnits(bal, decimals)), ethOut: Number(formatEther(out)) };
+  }
+
+  private async valueInEthV3(token: string, fee: number): Promise<{ tokens: number; ethOut: number }> {
+    const weth = getAddress(config.SNIPER_WETH);
+    const t = getAddress(token);
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const bal = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
+    if (bal <= 0n) throw new Error('wallet holds none of this token');
+    const decimals = Number((await token20.getFunction('decimals')()) as bigint);
+    let out = 0n;
+    try {
+      out = await this.quoteV3(t, weth, fee, bal);
+    } catch (err) {
+      throw new Error(`v3 quote failed (${shortErr(err)})`);
     }
     return { tokens: Number(formatUnits(bal, decimals)), ethOut: Number(formatEther(out)) };
   }
@@ -584,19 +776,54 @@ export class SwapExecutor {
     }
   }
 
-  async sell(token: string, poolIdHint?: string | null): Promise<SellResult> {
+  /** Sell the wallet's entire balance of `token`. Tries v4 first (including a
+   *  slippage retry on a mid-flight price move — see SNIPER_MAX_SELL_SLIPPAGE_PCT);
+   *  if v4 has no pool or prices wildly off `expectedPriceEth`, falls back to
+   *  v3. This is also how a position bought into a bad v4 pool (see buy())
+   *  gets OUT correctly: the v4 leg fails the same sanity check on the way out
+   *  and v3 — the pool that's actually liquid — takes over automatically. */
+  async sell(token: string, poolIdHint?: string | null, expectedPriceEth?: number | null): Promise<SellResult> {
     this.init();
     if (!this.wallet) throw new Error('sniper wallet not configured');
+    try {
+      return await this.sellV4(token, poolIdHint, expectedPriceEth);
+    } catch (v4Err) {
+      const v3 = await this.resolveV3Pool(token);
+      if (!v3) throw v4Err;
+      logger.warn({ token, v4Err: shortErr(v4Err), fee: v3.fee }, 'sniper: v4 sell unavailable, trying v3');
+      return await this.sellV3(token, expectedPriceEth, v3.fee);
+    }
+  }
+
+  private async sellV4(
+    token: string,
+    poolIdHint: string | null | undefined,
+    expectedPriceEth: number | null | undefined,
+  ): Promise<SellResult> {
     const pool = await this.resolvePool(token, poolIdHint);
-    const token20 = new Contract(token, ERC20_ABI, this.wallet);
-    const bal = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const bal = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
     if (bal <= 0n) throw new Error('no token balance to sell');
     const decimals = Number((await token20.getFunction('decimals')()) as bigint);
 
     await this.ensurePermit2(token, bal);
 
+    // Sanity-check BEFORE attempting any swap/retry — a bad pool should hand
+    // off to v3, not burn gas retrying at wider slippage on the same bad pool.
+    if (expectedPriceEth != null && expectedPriceEth > 0) {
+      let preQuote: bigint;
+      try {
+        preQuote = await this.quoteOut(pool, bal, false);
+      } catch (err) {
+        throw new Error(`sell quote reverted (${shortErr(err)})`);
+      }
+      const quotedPriceEth = Number(formatEther(preQuote)) / Number(formatUnits(bal, decimals));
+      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE, 'sell');
+      if (sanityErr) throw new Error(sanityErr);
+    }
+
     try {
-      return await this.attemptSell(pool, token, bal, decimals, config.SNIPER_SLIPPAGE_PCT);
+      return await this.attemptSellV4(pool, token, bal, decimals, config.SNIPER_SLIPPAGE_PCT);
     } catch (err) {
       // A token crashing (or just thin) can move past normal slippage between
       // the quote and the mined block. Getting out matters more than price
@@ -606,11 +833,11 @@ export class SwapExecutor {
         { token, err: shortErr(err), retryPct: config.SNIPER_MAX_SELL_SLIPPAGE_PCT },
         'sniper: sell reverted, retrying at max slippage',
       );
-      return await this.attemptSell(pool, token, bal, decimals, config.SNIPER_MAX_SELL_SLIPPAGE_PCT);
+      return await this.attemptSellV4(pool, token, bal, decimals, config.SNIPER_MAX_SELL_SLIPPAGE_PCT);
     }
   }
 
-  private async attemptSell(
+  private async attemptSellV4(
     pool: ResolvedPool,
     token: string,
     bal: bigint,
@@ -650,11 +877,89 @@ export class SwapExecutor {
     } catch (err) {
       throw new Error(`sell swap reverted (${shortErr(err)})`);
     }
-    logger.info({ token, tx: tx.hash, slippagePct }, 'sniper: sell sent');
+    logger.info({ token, tx: tx.hash, venue: 'v4', slippagePct }, 'sniper: sell sent');
     const receipt = await tx.wait(1);
     return {
       txHash: tx.hash,
       ethReceived: Number(formatEther(quotedOut)),
+      tokensSold: Number(formatUnits(bal, decimals)),
+      gasEth: receipt ? gasCostEth(receipt) : 0,
+    };
+  }
+
+  private async sellV3(
+    token: string,
+    expectedPriceEth: number | null | undefined,
+    fee: number,
+  ): Promise<SellResult> {
+    const weth = getAddress(config.SNIPER_WETH);
+    const t = getAddress(token);
+    const token20 = new Contract(token, ERC20_ABI, this.wallet!);
+    const bal = (await token20.getFunction('balanceOf')(this.wallet!.address)) as bigint;
+    if (bal <= 0n) throw new Error('no token balance to sell');
+    const decimals = Number((await token20.getFunction('decimals')()) as bigint);
+
+    await this.ensureErc20Approval(token, V3_ROUTER, bal);
+
+    if (expectedPriceEth != null && expectedPriceEth > 0) {
+      let preQuote: bigint;
+      try {
+        preQuote = await this.quoteV3(t, weth, fee, bal);
+      } catch (err) {
+        throw new Error(`v3 sell quote reverted (${shortErr(err)})`);
+      }
+      const quotedPriceEth = Number(formatEther(preQuote)) / Number(formatUnits(bal, decimals));
+      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE, 'sell');
+      if (sanityErr) throw new Error(`v3: ${sanityErr}`);
+    }
+
+    try {
+      return await this.attemptSellV3(t, weth, fee, bal, decimals, config.SNIPER_SLIPPAGE_PCT);
+    } catch (err) {
+      logger.warn(
+        { token, err: shortErr(err), retryPct: config.SNIPER_MAX_SELL_SLIPPAGE_PCT, venue: 'v3' },
+        'sniper: v3 sell reverted, retrying at max slippage',
+      );
+      return await this.attemptSellV3(t, weth, fee, bal, decimals, config.SNIPER_MAX_SELL_SLIPPAGE_PCT);
+    }
+  }
+
+  private async attemptSellV3(
+    token: string,
+    weth: string,
+    fee: number,
+    bal: bigint,
+    decimals: number,
+    slippagePct: number,
+  ): Promise<SellResult> {
+    let quoted: bigint;
+    try {
+      quoted = await this.quoteV3(token, weth, fee, bal);
+    } catch (err) {
+      throw new Error(`v3 sell quote reverted (${shortErr(err)})`);
+    }
+    const amountOutMin = this.minOut(quoted, slippagePct);
+    const router = new Contract(V3_ROUTER, V3_ROUTER_ABI, this.wallet!);
+    // recipient = the router itself: it holds the WETH momentarily, then
+    // unwrapWETH9 sweeps it out as native ETH to the wallet, in one multicall.
+    const swapCalldata = router.interface.encodeFunctionData('exactInputSingle', [
+      [token, weth, fee, V3_ROUTER, bal, amountOutMin, 0n],
+    ]);
+    const unwrapCalldata = router.interface.encodeFunctionData('unwrapWETH9', [
+      amountOutMin,
+      this.wallet!.address,
+    ]);
+    let tx;
+    try {
+      tx = await router.getFunction('multicall')([swapCalldata, unwrapCalldata]);
+    } catch (err) {
+      throw new Error(`v3 sell swap reverted (${shortErr(err)})`);
+    }
+    logger.info({ token, tx: tx.hash, venue: 'v3', fee, slippagePct }, 'sniper: sell sent');
+    const receipt = await tx.wait(1);
+    return {
+      txHash: tx.hash,
+      ethReceived: Number(formatEther(quoted)),
       tokensSold: Number(formatUnits(bal, decimals)),
       gasEth: receipt ? gasCostEth(receipt) : 0,
     };
