@@ -273,6 +273,10 @@ function renderSniperPanel(d){
       ' <input id="sn-teth" type="number" step="0.0001" value="0.0005" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:90px">'+
       ' <button id="sn-test" class="snbtn" style="background:var(--panel2);color:#f0b429">Test buy</button>'+
       ' <span id="sn-test-out" class="mono"></span>'+
+      '<div class="mono" style="margin:12px 0 6px">🩹 Recover a holding the wallet has but the bot isn\\'t tracking (e.g. after a redeploy):</div>'+
+      '<input id="sn-imp" placeholder="token address 0x…" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:12px inherit;width:300px">'+
+      ' <button id="sn-import" class="snbtn" style="background:var(--panel2);color:var(--green)">Import position</button>'+
+      ' <span id="sn-imp-out" class="mono"></span>'+
     '</div>':'';
   panel.innerHTML=walletForm+
     '<div id="sn-acct" style="margin-bottom:12px"></div>'+
@@ -311,6 +315,15 @@ function renderSniperPanel(d){
     const r=await fetch('/api/sniper/test-buy',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({token,eth})});
     const j=await r.json();
     out.innerHTML = r.ok ? '✅ bought — tx '+short(j.position.buyTx) : '❌ '+(j.error||'failed');
+    await loadSniper(false);
+  };
+  if($('sn-import')) $('sn-import').onclick=async()=>{
+    const token=$('sn-imp').value.trim(); const out=$('sn-imp-out');
+    if(!token){ out.textContent='enter a token address'; return; }
+    out.textContent='importing…';
+    const r=await fetch('/api/sniper/import',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify({token})});
+    const j=await r.json();
+    out.innerHTML = r.ok ? '✅ recovered '+j.position.tokensReceived.toFixed(2)+' tokens ('+j.position.ethIn+' Ξ)' : '❌ '+(j.error||'failed');
     await loadSniper(false);
   };
 }
