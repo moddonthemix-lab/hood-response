@@ -188,6 +188,11 @@ const schema = z.object({
   SNIPER_MAX_ETH_PER_TRADE: num(0.005), // hard per-trade ceiling
   SNIPER_DAILY_CAP_ETH: num(0.05), // stop buying once this is spent in 24h
   SNIPER_SLIPPAGE_PCT: num(15),
+  // A sell that reverts (e.g. price moved past normal slippage while the tx
+  // was in flight on a fast-crashing token) retries ONCE at this much wider
+  // tolerance — exiting matters more than price when you're trying to get out.
+  // Only applies to sells; buys are never force-executed past normal slippage.
+  SNIPER_MAX_SELL_SLIPPAGE_PCT: num(50),
   SNIPER_TAKE_PROFIT_PCT: num(0), // auto-sell a position at +this% (0 = off)
   SNIPER_KINDS: z.string().default('BUY,SOLO,ENTRY'), // alert kinds to snipe
   SNIPER_STORE_PATH: z.string().default(''), // persist positions across redeploys
