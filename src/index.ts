@@ -10,6 +10,7 @@ import { buildServer } from './api/server.js';
 import { configuredChannels } from './notify/index.js';
 import { SafetyChecker } from './chain/safety.js';
 import { PerformanceTracker } from './engine/performance.js';
+import { SniperEngine } from './sniper/engine.js';
 import type { Swarm, SwapEvent } from './types.js';
 
 async function main(): Promise<void> {
@@ -35,9 +36,16 @@ async function main(): Promise<void> {
   const performance = new PerformanceTracker(price);
   await performance.load();
   performance.start();
+
+  // Sniper: auto-buy qualifying alerts with a server hot wallet (off by default).
+  const sniper = new SniperEngine(price);
+  await sniper.load();
+  sniper.start();
+
   store.on('alert', (a) => {
     performance.track(a.swarm);
     performance.sampleSoon();
+    void sniper.onAlert(a.swarm);
   });
 
   const detachPersistence = await attachPersistence(store);
@@ -209,7 +217,7 @@ async function main(): Promise<void> {
   const listener = createListener(store, price, (swap) => void handleSwap(swap));
   listener.start();
 
-  const app = await buildServer(store, engine, aggregator, performance);
+  const app = await buildServer(store, engine, aggregator, performance, sniper);
   await app.listen({ port: config.PORT, host: config.HOST });
   logger.info(
     { url: `http://${config.HOST}:${config.PORT}`, wallets: store.wallets.size },
@@ -224,6 +232,7 @@ async function main(): Promise<void> {
     listener.stop();
     price.stop();
     performance.stop();
+    sniper.stop();
     await performance.flush().catch(() => undefined);
     await app.close().catch(() => undefined);
     await detachPersistence();

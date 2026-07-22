@@ -25,6 +25,15 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .spacer { flex:1; }
   .metrics { display:flex; gap:18px; flex-wrap:wrap; }
   .metrics b { color:var(--text); }
+  .tabs { display:flex; gap:8px; padding:10px 20px 0; max-width:1500px; margin:0 auto; }
+  .tab { cursor:pointer; font:13px inherit; padding:8px 16px; border-radius:8px 8px 0 0;
+    border:1px solid var(--line); border-bottom:none; background:var(--panel2); color:var(--muted); }
+  .tab.active { background:var(--panel); color:var(--text); font-weight:600; }
+  .snbtn { cursor:pointer; font:13px inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--line); }
+  .field { display:inline-flex; flex-direction:column; gap:4px; margin:0 14px 12px 0; }
+  .field label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .field input { background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:6px 8px; font:13px inherit; width:120px; }
   main { display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:16px 20px; max-width:1500px; margin:0 auto; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
   .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color:var(--muted);
@@ -79,7 +88,12 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   </div>
 </header>
 
-<main>
+<nav class="tabs">
+  <button class="tab active" data-tab="main">📊 Live</button>
+  <button class="tab" data-tab="sniper">🎯 Sniper</button>
+</nav>
+
+<main id="tab-main">
   <section class="card newcard full">
     <h2>🆕 New-Coin Swarms <span class="mono">tracked wallets buying coins not on the list</span></h2>
     <div class="body" id="newcoins"><div class="empty">no new-coin swarms yet</div></div>
@@ -118,6 +132,17 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   <section class="card full admin-only" style="display:none">
     <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
     <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
+  </section>
+</main>
+
+<main id="tab-sniper" style="display:none">
+  <section class="card full">
+    <h2>🎯 Sniper — auto-buy <span class="mono" id="sniper-status">— unlock Admin to view</span></h2>
+    <div class="body" id="sniper-panel" style="padding:14px"><div class="empty">click 🔒 Admin, then the Sniper tab</div></div>
+  </section>
+  <section class="card full">
+    <h2>💼 Positions & PnL <span class="mono" id="sniper-pnl"></span></h2>
+    <div class="body" id="sniper-positions"><div class="empty">no positions yet</div></div>
   </section>
 </main>
 
@@ -213,6 +238,63 @@ async function loadFilters(){
   el.appendChild(mk('Blue-chip SELLS', f.blueChipSells, 'sells'));
 }
 
+// ── Sniper tab ────────────────────────────────────────────────────────────────
+function snPosRow(p){
+  const d=document.createElement('div'); d.className='row';
+  const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
+  const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
+  d.innerHTML=st+'<span class="tag" style="background:#12283a;color:var(--accent)">'+p.conviction+'</span>'+
+    '<span class="sym">'+dexLink(p.token,p.tokenSymbol)+'</span>'+
+    '<span class="grow mono">in '+p.ethIn+' Ξ · entry '+usd(p.entryMarketCap)+' MC</span>'+
+    '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
+    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>';
+  return d;
+}
+async function loadSniper(){
+  if(!ADMIN_PW){ $('sniper-status').textContent='— unlock Admin to view'; return; }
+  let d; try{ d=await fetch('/api/sniper',{headers:adminHeaders()}).then(r=>r.json()); }catch(e){ return; }
+  const s=d.settings||{}; const w=d.wallet||{};
+  const panel=$('sniper-panel');
+  const warn=d.configured?'':'<div style="color:var(--red);margin-bottom:10px">⚠️ Not configured — set SNIPER_PRIVATE_KEY, SNIPER_ROUTER and SNIPER_WETH in Railway to enable real buys.</div>';
+  const onoff='<button id="sn-toggle" class="snbtn" style="background:'+(s.enabled?'#0d2a17':'#2b1113')+';color:'+(s.enabled?'var(--green)':'var(--red)')+'">'+(s.enabled?'🟢 SNIPER ON':'⛔ SNIPER OFF')+'</button>';
+  const wallet=w.address?('wallet <code>'+short(w.address)+'</code> · balance '+(w.balanceEth==null?'?':w.balanceEth.toFixed(4))+' Ξ'):'no wallet';
+  panel.innerHTML=warn+
+    '<div style="margin-bottom:12px">'+onoff+' <span class="mono" style="margin-left:12px">'+wallet+'</span></div>'+
+    '<div style="display:flex;flex-wrap:wrap;align-items:flex-end">'+
+      '<div class="field"><label>Buy conviction min</label><input id="sn-min" type="number" value="'+s.minConviction+'"></div>'+
+      '<div class="field"><label>max</label><input id="sn-max" type="number" value="'+s.maxConviction+'"></div>'+
+      '<div class="field"><label>Buy amount (Ξ, min '+d.minBuyEth+')</label><input id="sn-buy" type="number" step="0.0001" value="'+s.buyEth+'"></div>'+
+      '<div class="field"><label>Take profit %</label><input id="sn-tp" type="number" value="'+s.takeProfitPct+'"></div>'+
+      '<button id="sn-save" class="snbtn" style="background:var(--panel2);color:var(--accent);margin-bottom:12px">Save</button>'+
+    '</div>'+
+    '<div class="mono">per-trade cap '+d.caps.perTradeEth+' Ξ · daily cap '+d.caps.dailyEth+' Ξ · spent 24h '+d.caps.spentTodayEth+' Ξ</div>';
+  $('sniper-status').textContent=d.configured?(s.enabled?'— 🟢 armed':'— off'):'— not configured';
+  $('sn-toggle').onclick=async()=>{ await fetch('/api/sniper/toggle',{method:'POST',headers:adminHeaders()}); await loadSniper(); };
+  $('sn-save').onclick=async()=>{
+    const body={ minConviction:+$('sn-min').value, maxConviction:+$('sn-max').value, buyEth:+$('sn-buy').value, takeProfitPct:+$('sn-tp').value };
+    await fetch('/api/sniper/settings',{method:'POST',headers:{...adminHeaders(),'content-type':'application/json'},body:JSON.stringify(body)});
+    await loadSniper();
+  };
+  // PnL + positions
+  const p=d.pnl||{}; const tot=p.totalPnlEth||0;
+  $('sniper-pnl').textContent='— total PnL '+(tot>=0?'+':'')+tot+' Ξ · open '+(p.openValueEth||0)+' Ξ (in '+(p.investedEth||0)+') · realized '+(p.realizedPnlEth||0)+' Ξ';
+  const el=$('sniper-positions'); el.innerHTML='';
+  const ps=d.positions||[];
+  if(!ps.length){ el.innerHTML='<div class="empty">no positions yet — turn Sniper on and wait for a qualifying alert</div>'; }
+  else ps.forEach(pp=>el.appendChild(snPosRow(pp)));
+}
+
+let SNIPER_TIMER=null;
+async function showTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  $('tab-main').style.display = name==='main'?'':'none';
+  $('tab-sniper').style.display = name==='sniper'?'':'none';
+  if(name==='sniper'){
+    if(!ADMIN_PW){ await unlockAdmin(); }
+    if(ADMIN_PW){ await loadSniper(); if(!SNIPER_TIMER) SNIPER_TIMER=setInterval(loadSniper,30000); }
+  }
+}
+
 async function unlockAdmin(){
   const pw=prompt('Enter admin password'); if(!pw) return;
   let ok=false; try{ ok=(await fetch('/api/admin/verify',{method:'POST',headers:{'x-admin-password':pw}})).ok; }catch(e){}
@@ -293,6 +375,7 @@ async function boot(){
   await loadTables();
   await loadPerformance();
   $('admin-btn').onclick=unlockAdmin;
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
   setInterval(loadTables, 8000);
   setInterval(loadPerformance, 30000);
 

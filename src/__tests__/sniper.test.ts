@@ -1,0 +1,108 @@
+import { describe, it, expect } from 'vitest';
+import { SniperEngine, MIN_BUY_ETH } from '../sniper/engine.js';
+import type { SwapExecutor } from '../sniper/executor.js';
+import type { Swarm } from '../types.js';
+
+function stubPrice(prices: Record<string, number>) {
+  return {
+    async refreshNow() {},
+    priceOf: (a: string) => prices[a] ?? 0,
+    isLive: (a: string) => (prices[a] ?? 0) > 0,
+  } as unknown as import('../chain/price.js').PriceOracle;
+}
+
+function stubExecutor(log: string[]) {
+  return {
+    ready: true,
+    address: () => '0xwallet',
+    async balanceEth() {
+      return 1;
+    },
+    async buy(token: string, eth: number) {
+      log.push('buy:' + token + ':' + eth);
+      return { txHash: '0xbuy', tokensReceived: 1000, ethSpent: eth };
+    },
+    async sell(token: string) {
+      log.push('sell:' + token);
+      return { txHash: '0xsell', ethReceived: 0.002, tokensSold: 1000 };
+    },
+  } as unknown as SwapExecutor;
+}
+
+function swarm(over: Partial<Swarm> = {}): Swarm {
+  return {
+    id: 's-' + Math.random().toString(36).slice(2),
+    kind: 'BUY',
+    token: '0xtok',
+    tokenSymbol: 'GEM',
+    walletCount: 3,
+    wallets: [],
+    walletSummary: '3 alpha',
+    totalUsd: 3000,
+    marketCap: 60_000,
+    newToken: false,
+    dexUrl: 'x',
+    priceLive: true,
+    priceUsd: 1,
+    conviction: 75,
+    convictionBreakdown: {
+      walletQuality: 0, walletCount: 0, totalCapital: 0, velocity: 0,
+      liquidity: 0, marketCap: 0, historicalAccuracy: 0, buySellRatio: 0,
+    },
+    windowSeconds: 10,
+    firstSeen: Date.now(),
+    lastSeen: Date.now(),
+    ...over,
+  };
+}
+
+describe('SniperEngine', () => {
+  it('does nothing when disabled', async () => {
+    const log: string[] = [];
+    const eng = new SniperEngine(stubPrice({ '0xtok': 1 }), stubExecutor(log));
+    await eng.onAlert(swarm());
+    expect(log).toHaveLength(0);
+  });
+
+  it('buys a qualifying alert and enforces the min buy floor', async () => {
+    const log: string[] = [];
+    const eng = new SniperEngine(stubPrice({ '0xtok': 1 }), stubExecutor(log));
+    eng.updateSettings({ enabled: true, buyEth: 0.0001 }); // below the floor
+    await eng.onAlert(swarm());
+    expect(log).toEqual(['buy:0xtok:' + MIN_BUY_ETH]); // floored up to 0.0005
+    const snap = await eng.snapshot();
+    expect(snap.positions).toHaveLength(1);
+    expect(snap.positions[0]!.status).toBe('open');
+  });
+
+  it('skips alerts outside the conviction band, wrong kind, or already held', async () => {
+    const log: string[] = [];
+    const eng = new SniperEngine(stubPrice({ '0xtok': 1, '0xb': 1 }), stubExecutor(log));
+    eng.updateSettings({ enabled: true, minConviction: 60, maxConviction: 100 });
+    await eng.onAlert(swarm({ token: '0xa', conviction: 50 })); // too low
+    await eng.onAlert(swarm({ token: '0xb', kind: 'SELL' })); // wrong kind
+    expect(log).toHaveLength(0);
+    // First buy of 0xtok works; a second alert for the same token is skipped.
+    await eng.onAlert(swarm({ token: '0xtok' }));
+    await eng.onAlert(swarm({ token: '0xtok' }));
+    expect(log).toEqual(['buy:0xtok:0.0005']);
+  });
+
+  it('auto-sells at take-profit and books realized PnL', async () => {
+    const log: string[] = [];
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const eng = new SniperEngine(stubPrice(prices), stubExecutor(log));
+    eng.updateSettings({ enabled: true, takeProfitPct: 50 });
+    await eng.onAlert(swarm());
+
+    prices['0xtok'] = 2; // +100% → past the 50% take-profit
+    // @ts-expect-error exercise the private sampler
+    await eng.sample();
+
+    expect(log).toContain('sell:0xtok');
+    const snap = await eng.snapshot();
+    expect(snap.positions[0]!.status).toBe('closed');
+    expect(snap.positions[0]!.closeReason).toBe('take-profit');
+    expect(snap.pnl.realizedPnlEth).toBeCloseTo(0.0005, 6); // entry 0.0005 Ξ → 2x = +0.0005
+  });
+});

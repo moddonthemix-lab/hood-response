@@ -7,6 +7,7 @@ import type { MemoryStore } from '../store/memory.js';
 import type { AlertEngine } from '../engine/alertEngine.js';
 import type { Aggregator } from '../engine/aggregator.js';
 import type { PerformanceTracker } from '../engine/performance.js';
+import type { SniperEngine } from '../sniper/engine.js';
 import { configuredChannels, dispatch } from '../notify/index.js';
 import type { Alert, AlertRule, Swarm, SwapEvent, WalletCategory } from '../types.js';
 import { DASHBOARD_HTML } from './dashboard.js';
@@ -65,11 +66,20 @@ const ruleBody = z.object({
   ignoredWallets: z.array(z.string()).default([]),
 });
 
+const sniperSettingsBody = z.object({
+  enabled: z.boolean().optional(),
+  minConviction: z.number().min(0).max(100).optional(),
+  maxConviction: z.number().min(0).max(100).optional(),
+  buyEth: z.number().positive().optional(),
+  takeProfitPct: z.number().min(0).optional(),
+});
+
 export async function buildServer(
   store: MemoryStore,
   engine: AlertEngine,
   aggregator: Aggregator,
   performance?: PerformanceTracker,
+  sniper?: SniperEngine,
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
@@ -216,6 +226,27 @@ export async function buildServer(
     store.mutedTokens.delete(sym);
     logger.info({ symbol: sym }, 'unmuted wallet group');
     return mutedState();
+  });
+
+  // ── Sniper (auto-buy) — admin only, holds a hot wallet ─────────────────────────
+  app.get('/api/sniper', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return { enabled: false, configured: false, positions: [] };
+    return sniper.snapshot();
+  });
+  app.post('/api/sniper/settings', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    const parsed = sniperSettingsBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    sniper.updateSettings(parsed.data);
+    return sniper.snapshot();
+  });
+  app.post('/api/sniper/toggle', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!sniper) return reply.code(503).send({ error: 'sniper not available' });
+    sniper.updateSettings({ enabled: !sniper.settings.enabled });
+    return sniper.snapshot();
   });
 
   // ── Performance / outcomes ─────────────────────────────────────────────────────
