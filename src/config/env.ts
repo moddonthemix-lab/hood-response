@@ -145,6 +145,25 @@ const schema = z.object({
   // default is a convenience only. Empty disables the admin gate entirely.
   ADMIN_PASSWORD: z.string().default('abcfly'),
 
+  // ── Sniper: auto-buy alerts with a server hot wallet ──────────────────────────
+  // A single on/off switch (SNIPER_ENABLED), OFF by default. When ON it places
+  // REAL buys, so use a DEDICATED burner wallet funded with only what you can
+  // lose, never your main wallet. It won't trade unless the key + router + WETH
+  // are set. Per-trade + daily caps and the off switch are the safety rails.
+  SNIPER_ENABLED: bool(false), // master on/off — ON = real buys
+  SNIPER_PRIVATE_KEY: z.string().default(''), // burner hot-wallet key (Railway env only)
+  SNIPER_ROUTER: z.string().default(''), // Uniswap-V2-style DEX router (MUST verify)
+  SNIPER_WETH: z.string().default(''), // wrapped-native address for the swap path
+  SNIPER_MIN_CONVICTION: num(60),
+  SNIPER_MAX_CONVICTION: num(100),
+  SNIPER_BUY_ETH: num(0.0005), // per-alert buy size
+  SNIPER_MAX_ETH_PER_TRADE: num(0.005), // hard per-trade ceiling
+  SNIPER_DAILY_CAP_ETH: num(0.05), // stop buying once this is spent in 24h
+  SNIPER_SLIPPAGE_PCT: num(15),
+  SNIPER_TAKE_PROFIT_PCT: num(0), // auto-sell a position at +this% (0 = off)
+  SNIPER_KINDS: z.string().default('BUY,SOLO,ENTRY'), // alert kinds to snipe
+  SNIPER_STORE_PATH: z.string().default(''), // persist positions across redeploys
+
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
@@ -201,6 +220,11 @@ export const config = {
   mutedWalletTokens: env.MUTE_WALLET_TOKENS.split(',')
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean),
+  sniperKinds: new Set(
+    env.SNIPER_KINDS.split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+  ),
   notifications: {
     discord: env.DISCORD_WEBHOOK_URL || null,
     telegram:

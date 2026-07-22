@@ -1,0 +1,278 @@
+import { randomUUID } from 'node:crypto';
+import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { config } from '../config/env.js';
+import { logger } from '../logger.js';
+import type { PriceOracle } from '../chain/price.js';
+import type { Swarm } from '../types.js';
+import { SwapExecutor } from './executor.js';
+
+/** Absolute floor on any single buy, regardless of the configured amount. */
+export const MIN_BUY_ETH = 0.0005;
+const SAMPLE_MS = 60_000;
+
+export interface Position {
+  id: string;
+  token: string;
+  tokenSymbol: string;
+  kind: string;
+  conviction: number;
+  ethIn: number;
+  entryPriceUsd: number;
+  entryMarketCap: number;
+  tokensReceived: number;
+  buyTx: string;
+  openedAt: number;
+  lastPriceUsd: number;
+  updatedAt: number;
+  status: 'open' | 'closed';
+  closedAt?: number;
+  sellTx?: string;
+  exitPriceUsd?: number;
+  closeReason?: 'take-profit' | 'manual';
+}
+
+/** Runtime-adjustable knobs (seeded from env, editable via the API). */
+export interface SniperSettings {
+  enabled: boolean;
+  minConviction: number;
+  maxConviction: number;
+  buyEth: number;
+  takeProfitPct: number;
+}
+
+const priceRatio = (p: Position, price: number): number =>
+  p.entryPriceUsd > 0 ? price / p.entryPriceUsd : 1;
+
+/** Live-computed view of a position for the API/dashboard. */
+function view(p: Position) {
+  const ref = p.status === 'closed' ? (p.exitPriceUsd ?? p.lastPriceUsd) : p.lastPriceUsd;
+  const ratio = priceRatio(p, ref);
+  const valueEth = p.ethIn * ratio;
+  return {
+    ...p,
+    valueEth: Math.round(valueEth * 1e6) / 1e6,
+    pnlEth: Math.round((valueEth - p.ethIn) * 1e6) / 1e6,
+    pnlPct: Math.round((ratio - 1) * 1000) / 10,
+  };
+}
+
+/**
+ * Auto-buys qualifying alerts with a server hot wallet and manages the open
+ * positions (live value, PnL, take-profit auto-sell). Off by default; when on
+ * it places REAL swaps through the SwapExecutor. All spending is bounded by the
+ * per-trade and daily caps and the absolute MIN_BUY_ETH floor.
+ */
+export class SniperEngine {
+  private readonly positions = new Map<string, Position>();
+  private readonly buys: { at: number; eth: number }[] = [];
+  private timer: NodeJS.Timeout | null = null;
+  private warnedUnconfigured = false;
+  readonly executor: SwapExecutor;
+
+  settings: SniperSettings = {
+    enabled: config.SNIPER_ENABLED,
+    minConviction: config.SNIPER_MIN_CONVICTION,
+    maxConviction: config.SNIPER_MAX_CONVICTION,
+    buyEth: config.SNIPER_BUY_ETH,
+    takeProfitPct: config.SNIPER_TAKE_PROFIT_PCT,
+  };
+
+  constructor(
+    private readonly price: PriceOracle,
+    executor?: SwapExecutor,
+  ) {
+    this.executor = executor ?? new SwapExecutor();
+  }
+
+  start(): void {
+    this.timer = setInterval(() => void this.sample(), SAMPLE_MS);
+  }
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  /** Effective per-trade size after the floor and per-trade ceiling. */
+  private sizeEth(): number {
+    return Math.min(config.SNIPER_MAX_ETH_PER_TRADE, Math.max(MIN_BUY_ETH, this.settings.buyEth));
+  }
+
+  private spentLast24h(now: number): number {
+    const cut = now - 86_400_000;
+    return this.buys.filter((b) => b.at >= cut).reduce((s, b) => s + b.eth, 0);
+  }
+
+  private holdsOpen(token: string): boolean {
+    for (const p of this.positions.values()) if (p.status === 'open' && p.token === token) return true;
+    return false;
+  }
+
+  /** Alert hook: decide whether to snipe, and buy if so. */
+  async onAlert(swarm: Swarm): Promise<void> {
+    if (!this.settings.enabled) return;
+    if (!config.sniperKinds.has(swarm.kind)) return;
+    if (swarm.conviction < this.settings.minConviction || swarm.conviction > this.settings.maxConviction) return;
+    if (this.holdsOpen(swarm.token)) return; // already in it
+
+    const entryPrice = swarm.priceUsd ?? 0;
+    if (!swarm.priceLive || !(entryPrice > 0)) return; // need a real price to size/track
+
+    if (!this.executor.ready) {
+      if (!this.warnedUnconfigured) {
+        this.warnedUnconfigured = true;
+        logger.warn('sniper is ON but the wallet/router/WETH are not configured — no buys will run');
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const size = this.sizeEth();
+    if (this.spentLast24h(now) + size > config.SNIPER_DAILY_CAP_ETH) {
+      logger.warn({ token: swarm.tokenSymbol }, 'sniper: daily spend cap reached, skipping buy');
+      return;
+    }
+
+    try {
+      const res = await this.executor.buy(swarm.token, size);
+      this.buys.push({ at: now, eth: res.ethSpent });
+      const pos: Position = {
+        id: randomUUID(),
+        token: swarm.token,
+        tokenSymbol: swarm.tokenSymbol,
+        kind: swarm.kind,
+        conviction: swarm.conviction,
+        ethIn: res.ethSpent,
+        entryPriceUsd: entryPrice,
+        entryMarketCap: swarm.marketCap,
+        tokensReceived: res.tokensReceived,
+        buyTx: res.txHash,
+        openedAt: now,
+        lastPriceUsd: entryPrice,
+        updatedAt: now,
+        status: 'open',
+      };
+      this.positions.set(pos.id, pos);
+      logger.info(
+        { token: swarm.tokenSymbol, eth: size, conviction: swarm.conviction, tx: res.txHash },
+        'sniper: opened position',
+      );
+      void this.persist();
+    } catch (err) {
+      logger.error({ token: swarm.tokenSymbol, err: String(err) }, 'sniper: buy failed');
+    }
+  }
+
+  /** Periodic: refresh open-position prices and fire take-profit sells. */
+  private async sample(): Promise<void> {
+    const now = Date.now();
+    const open = [...this.positions.values()].filter((p) => p.status === 'open');
+    for (const p of open) {
+      try {
+        await this.price.refreshNow(p.token);
+      } catch {
+        /* transient */
+      }
+      const px = this.price.isLive(p.token) ? this.price.priceOf(p.token) : 0;
+      if (px > 0) {
+        p.lastPriceUsd = px;
+        p.updatedAt = now;
+        const tp = this.settings.takeProfitPct;
+        if (tp > 0 && (px / p.entryPriceUsd - 1) * 100 >= tp) {
+          await this.takeProfit(p);
+        }
+      }
+    }
+    void this.persist();
+  }
+
+  private async takeProfit(p: Position): Promise<void> {
+    if (p.status !== 'open') return;
+    try {
+      const res = await this.executor.sell(p.token);
+      p.status = 'closed';
+      p.closedAt = Date.now();
+      p.sellTx = res.txHash;
+      p.exitPriceUsd = p.lastPriceUsd;
+      p.closeReason = 'take-profit';
+      logger.info(
+        { token: p.tokenSymbol, tx: res.txHash, ethOut: res.ethReceived },
+        'sniper: took profit',
+      );
+    } catch (err) {
+      logger.error({ token: p.tokenSymbol, err: String(err) }, 'sniper: take-profit sell failed');
+    }
+  }
+
+  updateSettings(patch: Partial<SniperSettings>): SniperSettings {
+    if (typeof patch.enabled === 'boolean') this.settings.enabled = patch.enabled;
+    if (typeof patch.minConviction === 'number') this.settings.minConviction = clamp(patch.minConviction, 0, 100);
+    if (typeof patch.maxConviction === 'number') this.settings.maxConviction = clamp(patch.maxConviction, 0, 100);
+    if (typeof patch.buyEth === 'number') this.settings.buyEth = Math.max(MIN_BUY_ETH, patch.buyEth);
+    if (typeof patch.takeProfitPct === 'number') this.settings.takeProfitPct = Math.max(0, patch.takeProfitPct);
+    logger.info({ settings: this.settings }, 'sniper: settings updated');
+    return this.settings;
+  }
+
+  /** Full snapshot for the API/dashboard. */
+  async snapshot() {
+    const positions = [...this.positions.values()]
+      .map(view)
+      .sort((a, b) => (b.status === 'open' ? 1 : 0) - (a.status === 'open' ? 1 : 0) || b.openedAt - a.openedAt);
+    const open = positions.filter((p) => p.status === 'open');
+    const closed = positions.filter((p) => p.status === 'closed');
+    const unrealizedPnlEth = open.reduce((s, p) => s + p.pnlEth, 0);
+    const realizedPnlEth = closed.reduce((s, p) => s + p.pnlEth, 0);
+    const investedEth = open.reduce((s, p) => s + p.ethIn, 0);
+    const openValueEth = open.reduce((s, p) => s + p.valueEth, 0);
+    return {
+      configured: this.executor.ready,
+      wallet: { address: this.executor.address(), balanceEth: await this.executor.balanceEth() },
+      settings: this.settings,
+      minBuyEth: MIN_BUY_ETH,
+      caps: { perTradeEth: config.SNIPER_MAX_ETH_PER_TRADE, dailyEth: config.SNIPER_DAILY_CAP_ETH, spentTodayEth: round6(this.spentLast24h(Date.now())) },
+      pnl: {
+        investedEth: round6(investedEth),
+        openValueEth: round6(openValueEth),
+        unrealizedPnlEth: round6(unrealizedPnlEth),
+        realizedPnlEth: round6(realizedPnlEth),
+        totalPnlEth: round6(unrealizedPnlEth + realizedPnlEth),
+      },
+      positions,
+    };
+  }
+
+  // ── Persistence (survive redeploys via SNIPER_STORE_PATH) ─────────────────────
+  async load(): Promise<void> {
+    if (!config.SNIPER_STORE_PATH) return;
+    try {
+      const raw = await readFile(config.SNIPER_STORE_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      const arr = Array.isArray(parsed) ? (parsed as Position[]) : [];
+      for (const p of arr) if (p && p.id) this.positions.set(p.id, p);
+      logger.info({ loaded: this.positions.size }, 'sniper: restored positions');
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== 'ENOENT') logger.warn({ err: String(err) }, 'sniper: could not load positions');
+    }
+  }
+  private persisting = false;
+  private async persist(): Promise<void> {
+    if (!config.SNIPER_STORE_PATH || this.persisting) return;
+    this.persisting = true;
+    try {
+      const path = config.SNIPER_STORE_PATH;
+      await mkdir(dirname(path), { recursive: true });
+      const tmp = `${path}.tmp`;
+      await writeFile(tmp, JSON.stringify([...this.positions.values()]));
+      await rename(tmp, path);
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'sniper: could not save positions');
+    } finally {
+      this.persisting = false;
+    }
+  }
+}
+
+const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
+const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
