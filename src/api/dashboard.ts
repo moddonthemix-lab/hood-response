@@ -71,6 +71,20 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
   .empty { padding:20px 14px; color:var(--muted); }
   .flash { animation:flash .8s ease-out; }
+  .poscard { border:1px solid var(--line); border-radius:10px; background:var(--panel2);
+    padding:12px 14px; margin:12px; }
+  .poscard + .poscard { margin-top:0; }
+  .poscard.closed { opacity:.75; }
+  .poscard-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .poscard-pnl { margin-left:auto; text-align:right; }
+  .poscard-pnl .pnl-pct { font-size:17px; font-weight:700; }
+  .poscard-pnl .pnl-val { display:block; font-size:11px; color:var(--muted); }
+  .poscard-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px 16px;
+    padding:12px 0; margin:12px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .poscard-stat .stat-label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  .poscard-stat .stat-value { font-size:13px; margin-top:2px; }
+  .poscard-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .poscard-actions { display:flex; gap:6px; margin-left:auto; }
   @keyframes flash { from { background:#16324a; } to { background:transparent; } }
   @media (max-width:900px){ main{grid-template-columns:1fr;} .full{grid-column:1;} }
 </style>
@@ -94,6 +108,7 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
 <nav class="tabs">
   <button class="tab active" data-tab="main">📊 Live</button>
   <button class="tab" data-tab="sniper">🎯 Sniper</button>
+  <button class="tab" data-tab="plays">📈 Plays &amp; Stats</button>
 </nav>
 
 <main id="tab-main">
@@ -103,7 +118,9 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   </section>
 
   <section class="card full">
-    <h2>🏆 Best Calls <span class="mono" id="perf-note">— outcome of each alert (peak vs entry)</span></h2>
+    <h2>🏆 Best Calls <span class="mono" id="perf-note">— outcome of each alert (peak vs entry)</span>
+      <button id="perf-reset" class="pill admin-only" style="display:none;cursor:pointer;margin-left:auto" title="Clear the Best Calls list and start it over">🔄 Reset</button>
+    </h2>
     <div class="body" id="perf"><div class="empty">no tracked calls yet — fills in after live alerts</div></div>
   </section>
 
@@ -145,7 +162,18 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   </section>
   <section class="card full">
     <h2>💼 Positions & PnL <span class="mono" id="sniper-pnl"></span></h2>
-    <div class="body" id="sniper-positions"><div class="empty">no positions yet</div></div>
+    <div class="body" id="sniper-positions" style="max-height:70vh"><div class="empty">no positions yet</div></div>
+  </section>
+</main>
+
+<main id="tab-plays" style="display:none">
+  <section class="card full">
+    <h2>📈 Signal Stats <span class="mono" id="plays-note">— which setups actually run</span></h2>
+    <div class="body" id="plays-stats" style="padding:12px 14px;max-height:none"><div class="empty">loading…</div></div>
+  </section>
+  <section class="card full">
+    <h2>🏆 All Tracked Plays <span class="mono" id="plays-count"></span></h2>
+    <div class="body" id="plays-list" style="max-height:600px"><div class="empty">no tracked calls yet</div></div>
   </section>
 </main>
 
@@ -264,43 +292,57 @@ async function loadFilters(){
 }
 
 // ── Sniper tab ────────────────────────────────────────────────────────────────
+function posStat(label,value,title){
+  return '<div class="poscard-stat"'+(title?' title="'+title+'"':'')+'><div class="stat-label">'+label+'</div><div class="stat-value">'+value+'</div></div>';
+}
 function snPosRow(p,globalTp){
-  const d=document.createElement('div'); d.className='row'; d.style.flexWrap='wrap';
+  const d=document.createElement('div'); d.className='poscard'+(p.status==='closed'?' closed':'');
   const pct=p.pnlPct, gc=pct>=50?'hi':pct>=0?'mid':'lo';
   const st=p.status==='closed'?('<span class="tag" style="background:#20132e;color:var(--violet)" title="'+(p.closeReason||'closed')+'">'+(p.closeReason==='take-profit'?'✅ TP':'closed')+'</span>'):'<span class="tag BUY">OPEN</span>';
-  const sell=p.status==='open'?'<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:3px 10px;font-size:12px">Sell</button>':'';
-  const untrack=p.status==='open'?'<button class="snbtn sn-untrack" data-id="'+p.id+'" data-sym="'+p.tokenSymbol+'" data-tx="'+p.buyTx+'" data-eth="'+p.ethIn+'" title="stop tracking without selling (wallet holdings untouched)" style="background:var(--panel2);color:var(--muted);padding:3px 10px;font-size:12px;margin-left:4px">Untrack</button>':'';
   const imported=p.buyTx==='imported';
   const tx=imported?'<span title="recovered — no on-chain buy tx, wallet holding was imported">📥 imported</span>'
     :(p.status==='closed'&&p.sellTx?('🔗 '+txLink(p.sellTx)):('🔗 '+txLink(p.buyTx)));
-  const entryLabel=imported?'valued at':'entry';
-  d.innerHTML=st+'<span class="tag" style="background:#12283a;color:var(--accent)">'+p.conviction+'</span>'+
+  const entryLabel=imported?'Valued at':'Entry MC';
+
+  const head=document.createElement('div'); head.className='poscard-head';
+  head.innerHTML=st+
+    '<span class="tag" style="background:#12283a;color:var(--accent)" title="conviction at entry">'+p.conviction+'</span>'+
     '<span class="sym">'+dexLink(p.token,p.tokenSymbol)+'</span>'+
-    '<span class="grow mono">in '+p.ethIn+' Ξ · '+entryLabel+' '+usd(p.entryMarketCap)+' MC · '+tx+'</span>'+
-    '<span class="mono" title="position value now">'+p.valueEth+' Ξ</span>'+
-    '<span class="conv '+gc+'" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+sell+untrack;
+    '<span class="poscard-pnl"><span class="conv '+gc+' pnl-pct" title="PnL">'+(pct>=0?'+':'')+pct+'%</span>'+
+    '<span class="pnl-val">'+p.valueEth+' Ξ now</span></span>';
+  d.appendChild(head);
+
   const gasEth=p.gasEth||0; const netPnl=p.netPnlEth==null?p.pnlEth:p.netPnlEth;
   const buyTax=p.buyTaxPct==null?'?':p.buyTaxPct+'%'; const sellTax=p.sellTaxPct==null?'?':p.sellTaxPct+'%';
   const protoFee=p.protocolFeePctPerSwap;
-  const protoStr=protoFee==null?'':(' · 🏷️ protocol fee '+protoFee+'%/swap (buy+sell, DEX hook — not gas or tax)');
-  const feeWrap=document.createElement('div');
-  feeWrap.style.cssText='flex-basis:100%;display:flex;gap:16px;flex-wrap:wrap;padding-top:4px;margin-top:2px;border-top:1px dashed var(--line)';
-  feeWrap.innerHTML='<span class="mono" style="color:var(--muted)">⛽ gas '+gasEth+' Ξ</span>'+
-    '<span class="mono" style="color:var(--muted)" title="GoPlus scan at buy time">💸 token tax buy '+buyTax+' / sell '+sellTax+protoStr+'</span>'+
-    '<span class="mono" title="PnL after subtracting real gas fees paid (protocol fee already baked into tokens received / not-yet-realized on sell)">🧮 net after gas '+(netPnl>=0?'+':'')+netPnl+' Ξ</span>';
-  d.appendChild(feeWrap);
+  const stats=document.createElement('div'); stats.className='poscard-stats';
+  stats.innerHTML=
+    posStat('In',p.ethIn+' Ξ')+
+    posStat(entryLabel,usd(p.entryMarketCap))+
+    posStat('Tx',tx)+
+    posStat('Gas paid',gasEth+' Ξ')+
+    posStat('Token tax',buyTax+' / '+sellTax,'buy / sell, GoPlus scan at buy time')+
+    (protoFee!=null?posStat('Protocol fee',protoFee+'%/swap','DEX-hook fee on buy + sell — not gas or tax'):'')+
+    posStat('Net after gas',(netPnl>=0?'+':'')+netPnl+' Ξ','PnL after real gas paid (protocol fee already baked into tokens received)');
+  d.appendChild(stats);
+
+  const foot=document.createElement('div'); foot.className='poscard-foot';
   if(p.status==='open'){
     const override=(p.takeProfitPct!==undefined&&p.takeProfitPct!==null);
     const disabled=(p.takeProfitPct===null);
     const effective=override?p.takeProfitPct:globalTp;
-    const tpWrap=document.createElement('div');
-    tpWrap.style.cssText='flex-basis:100%;display:flex;align-items:center;gap:6px;padding-top:4px;margin-top:2px;border-top:1px dashed var(--line)';
+    const tpWrap=document.createElement('div'); tpWrap.style.cssText='display:flex;align-items:center;gap:6px;flex-wrap:wrap';
     tpWrap.innerHTML='<span class="mono" style="color:var(--muted)">🎯 TP: '+(disabled?'off':(effective+'%'+(override?' (custom)':' (default)')))+'</span>'+
-      '<input class="sn-tp-input" type="number" placeholder="%" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:3px 6px;font:12px inherit;width:70px" value="'+(override&&!disabled?p.takeProfitPct:'')+'">'+
-      '<button class="snbtn sn-tp-set" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--accent)">Set</button>'+
-      '<button class="snbtn sn-tp-clear" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--muted)">Use default</button>'+
-      '<button class="snbtn sn-tp-off" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel2);color:var(--red)">Off</button>';
-    d.appendChild(tpWrap);
+      '<input class="sn-tp-input" type="number" placeholder="%" style="background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:3px 6px;font:12px inherit;width:70px" value="'+(override&&!disabled?p.takeProfitPct:'')+'">'+
+      '<button class="snbtn sn-tp-set" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel);color:var(--accent)">Set</button>'+
+      '<button class="snbtn sn-tp-clear" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel);color:var(--muted)">Use default</button>'+
+      '<button class="snbtn sn-tp-off" data-id="'+p.id+'" style="padding:3px 10px;font-size:12px;background:var(--panel);color:var(--red)">Off</button>';
+    foot.appendChild(tpWrap);
+    const actions=document.createElement('div'); actions.className='poscard-actions';
+    actions.innerHTML='<button class="snbtn sn-sell" data-id="'+p.id+'" style="background:#2b1113;color:var(--red);padding:5px 12px;font-size:12px">Sell</button>'+
+      '<button class="snbtn sn-untrack" data-id="'+p.id+'" data-sym="'+p.tokenSymbol+'" data-tx="'+p.buyTx+'" data-eth="'+p.ethIn+'" title="stop tracking without selling (wallet holdings untouched)" style="background:var(--panel);color:var(--muted);padding:5px 12px;font-size:12px">Untrack</button>';
+    foot.appendChild(actions);
+    d.appendChild(foot);
   }
   return d;
 }
@@ -466,13 +508,19 @@ async function loadSniper(rebuild){
 }
 
 let SNIPER_TIMER=null;
+let PLAYS_TIMER=null;
 async function showTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
   $('tab-main').style.display = name==='main'?'':'none';
   $('tab-sniper').style.display = name==='sniper'?'':'none';
+  $('tab-plays').style.display = name==='plays'?'':'none';
   if(name==='sniper'){
     if(!ADMIN_PW){ await unlockAdmin(); }
     if(ADMIN_PW){ await loadSniper(true); if(!SNIPER_TIMER) SNIPER_TIMER=setInterval(()=>loadSniper(false),8000); }
+  }
+  if(name==='plays'){
+    await loadPlays();
+    if(!PLAYS_TIMER) PLAYS_TIMER=setInterval(loadPlays,30000);
   }
 }
 
@@ -508,8 +556,38 @@ async function loadPerformance(){
   else calls.forEach(c=>el.appendChild(perfRow(c)));
   const s=d.summary;
   if(s){ const mw=(s.byWalletCount||[])[0], rp=(s.byRepeat||[])[0];
-    $('perf-note').textContent='— '+s.total+' calls · multi-wallet win '+(mw?mw.winRatePct:0)+'% · repeat win '+(rp?rp.winRatePct:0)+'% (peak ≥'+s.winThresholdPct+'%)';
+    const resetNote=(d.resetsAt&&d.resetsAt.enabled)?(' · resets daily '+String(d.resetsAt.hour).padStart(2,'0')+':00 '+d.resetsAt.tz.split('/').pop().replace(/_/g,' ')):'';
+    $('perf-note').textContent='— '+s.total+' calls · multi-wallet win '+(mw?mw.winRatePct:0)+'% · repeat win '+(rp?rp.winRatePct:0)+'% (peak ≥'+s.winThresholdPct+'%)'+resetNote;
   }
+}
+
+function statsTable(title,buckets){
+  const rows=(buckets||[]).map(b=>'<tr><td>'+b.label+'</td><td class="num">'+b.count+'</td><td class="num">'+b.winRatePct+'%</td><td class="num">'+b.avgMaxGainPct+'%</td><td class="num">'+b.medianMaxGainPct+'%</td><td class="num">'+b.bestMaxGainPct+'%</td></tr>').join('');
+  return '<div style="min-width:280px;flex:1"><div class="mono" style="margin-bottom:6px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:11px">'+title+'</div>'+
+    '<table><thead><tr><th>Bucket</th><th class="num">N</th><th class="num">Win%</th><th class="num">Avg pk</th><th class="num">Med pk</th><th class="num">Best</th></tr></thead><tbody>'+
+    (rows||'<tr><td colspan="6" class="empty">no data yet</td></tr>')+'</tbody></table></div>';
+}
+async function loadPlays(){
+  let d; try{ d=await fetch('/api/performance?limit=500').then(r=>r.json()); }catch(e){ return; }
+  const statsEl=$('plays-stats');
+  if(!d.enabled){ statsEl.innerHTML='<div class="empty">performance tracking off</div>'; $('plays-list').innerHTML=''; return; }
+  const s=d.summary;
+  if(s){
+    statsEl.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:20px">'+
+      statsTable('By wallet count',s.byWalletCount)+
+      statsTable('By repeat',s.byRepeat)+
+      statsTable('By kind',s.byKind)+
+      statsTable('By conviction',s.byConviction)+
+      statsTable('By entry market cap',s.byMarketCap)+
+      '</div>';
+    const resetNote=(d.resetsAt&&d.resetsAt.enabled)?(' · resets daily '+String(d.resetsAt.hour).padStart(2,'0')+':00 '+d.resetsAt.tz.split('/').pop().replace(/_/g,' ')):'';
+    $('plays-note').textContent='— '+s.total+' calls tracked · win = peak ≥'+s.winThresholdPct+'%'+resetNote;
+  }
+  const listEl=$('plays-list'); const calls=d.calls||[];
+  $('plays-count').textContent='— '+calls.length+' shown, best peak first';
+  listEl.innerHTML='';
+  if(!calls.length){ listEl.innerHTML='<div class="empty">no tracked calls yet — fills in after live alerts</div>'; }
+  else calls.forEach(c=>listEl.appendChild(perfRow(c)));
 }
 
 async function loadMuted(){
@@ -556,6 +634,12 @@ async function boot(){
   await loadTables();
   await loadPerformance();
   $('admin-btn').onclick=unlockAdmin;
+  $('perf-reset').onclick=async()=>{
+    if(!confirm('Clear the Best Calls list and start it over?')) return;
+    const btn=$('perf-reset'); btn.disabled=true; btn.textContent='resetting…';
+    try{ await fetch('/api/performance/reset',{method:'POST',headers:adminHeaders()}); await loadPerformance(); await loadPlays(); }
+    finally{ btn.disabled=false; btn.textContent='🔄 Reset'; }
+  };
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
   setInterval(loadTables, 8000);
   setInterval(loadPerformance, 30000);

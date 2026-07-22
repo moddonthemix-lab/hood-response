@@ -351,9 +351,24 @@ export async function buildServer(
   // ── Performance / outcomes ─────────────────────────────────────────────────────
   app.get('/api/performance', async (req) => {
     const persist = { enabled: config.PERF_STORE_PATH.length > 0, path: config.PERF_STORE_PATH || null };
-    if (!performance) return { enabled: false, persist, calls: [], summary: null };
+    if (!performance) return { enabled: false, persist, calls: [], summary: null, resetsAt: null };
     const limit = clampLimit((req.query as { limit?: string }).limit);
-    return { enabled: true, persist, summary: performance.summary(), calls: performance.list().slice(0, limit) };
+    return {
+      enabled: true,
+      persist,
+      summary: performance.summary(),
+      calls: performance.list().slice(0, limit),
+      resetsAt: performance.resetInfo(),
+    };
+  });
+
+  // Manually clear the Best Calls tracker and start it over (also runs on its
+  // own once a day — see PERF_AUTO_RESET / PERF_RESET_HOUR / PERF_RESET_TZ).
+  app.post('/api/performance/reset', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
+    if (!performance) return reply.code(400).send({ error: 'performance tracking disabled' });
+    performance.reset();
+    return { enabled: true, summary: performance.summary(), calls: performance.list(), resetsAt: performance.resetInfo() };
   });
 
   // CSV snapshot of every tracked call — grab this before a redeploy, since the

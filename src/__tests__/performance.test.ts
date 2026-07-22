@@ -88,4 +88,35 @@ describe('PerformanceTracker', () => {
     const repeat = s.byRepeat.find((b) => b.label.startsWith('repeat'))!;
     expect(repeat.bestMaxGainPct).toBe(200);
   });
+
+  it('summary buckets by conviction and entry market cap', () => {
+    const perf = new PerformanceTracker(stubPrice({ '0xa': 1, '0xb': 1 }));
+    perf.track(swarm({ id: 'hi', token: '0xa', conviction: 85, marketCap: 40_000 }));
+    perf.track(swarm({ id: 'lo', token: '0xb', conviction: 55, marketCap: 3_000_000 }));
+
+    const s = perf.summary();
+    const band80 = s.byConviction.find((b) => b.label === '80-89')!;
+    const bandLt60 = s.byConviction.find((b) => b.label === '<60')!;
+    expect(band80.count).toBe(1);
+    expect(bandLt60.count).toBe(1);
+    const mcLt50k = s.byMarketCap.find((b) => b.label === '<50K')!;
+    const mc2mPlus = s.byMarketCap.find((b) => b.label === '2M+')!;
+    expect(mcLt50k.count).toBe(1);
+    expect(mc2mPlus.count).toBe(1);
+  });
+
+  it('reset() clears every tracked call, open or closed', () => {
+    const perf = new PerformanceTracker(stubPrice({ '0xtok': 1 }));
+    perf.track(swarm({ token: '0xtok' }));
+    expect(perf.list()).toHaveLength(1);
+    perf.reset();
+    expect(perf.list()).toHaveLength(0);
+    expect(perf.summary().total).toBe(0);
+  });
+
+  it('resetInfo reflects the configured auto-reset schedule', () => {
+    const perf = new PerformanceTracker(stubPrice({}));
+    const info = perf.resetInfo();
+    expect(info).toEqual({ enabled: true, hour: 8, tz: 'America/New_York' });
+  });
 });
