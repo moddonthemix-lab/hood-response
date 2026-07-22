@@ -169,7 +169,11 @@ export class PerformanceTracker {
       } catch {
         /* ignore transient fetch errors */
       }
-      const p = this.price.priceOf(c.token);
+      // Only sample a LIVE price. When DexScreener momentarily has no pair,
+      // priceOf() falls back to a synthetic placeholder unrelated to the real
+      // price — which would spike the peak to a garbage number that then sticks.
+      // Skip those ticks and keep the last good values.
+      const p = this.price.isLive(c.token) ? this.price.priceOf(c.token) : 0;
       if (p > 0) {
         c.lastPrice = p;
         c.lastGainPct = gainPct(c.entryPrice, p);

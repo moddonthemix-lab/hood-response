@@ -158,6 +158,7 @@ Invalid configuration fails fast at startup with a readable message.
 | GET | `/api/swaps` `/api/swarms` `/api/alerts` | recent activity (`?limit=`) |
 | POST | `/api/test-alert` | send a sample alert to every configured channel (verify a new channel instantly) |
 | GET | `/api/performance` | tracked alert outcomes (peak/current return) + win-rate by signal type |
+| GET | `/api/performance.csv` | CSV snapshot of every tracked call (grab before a redeploy — data is in-memory) |
 | GET | `/api/leaderboard/wallets` `/api/leaderboard/tokens` | rankings |
 | GET/POST/PUT/DELETE | `/api/rules[/:id]` | manage alert rules |
 | GET | `/events` | SSE stream: `swap`, `swarm`, `alert`, `metrics` |
