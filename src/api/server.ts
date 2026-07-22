@@ -492,7 +492,8 @@ export async function buildServer(
 
   // ── Dashboard ────────────────────────────────────────────────────────────────
   app.get('/', async (_req, reply) => {
-    reply.type('text/html').send(DASHBOARD_HTML);
+    // Never let a browser/proxy cache a stale dashboard build.
+    reply.header('cache-control', 'no-store').type('text/html').send(DASHBOARD_HTML);
   });
 
   app.setErrorHandler((err: unknown, _req, reply) => {
