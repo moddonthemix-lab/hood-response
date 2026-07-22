@@ -156,8 +156,15 @@ Invalid configuration fails fast at startup with a readable message.
 | GET/POST/DELETE | `/api/wallets[/:address]` | manage tracked wallets |
 | GET | `/api/muted` | current muted wallet groups + affected wallet count |
 | POST/DELETE | `/api/muted/:symbol` | mute / unmute a coin's wallets at runtime (e.g. `HMM`) |
-| GET | `/api/filters` | blue-chip buy/sell toggle state |
-| POST | `/api/bluechip/buys` `/api/bluechip/sells` | toggle blue-chip buy / sell alerts on/off |
+| GET | `/api/filters` | blue-chip buy/sell toggle state (admin) |
+| POST | `/api/bluechip/buys` `/api/bluechip/sells` | toggle blue-chip buy / sell alerts on/off (admin) |
+| POST | `/api/admin/verify` | validate the admin password (`x-admin-password` header) |
+
+> **Admin controls** — the Alert Filters and Wallet Groups sections and their
+> toggle endpoints are gated by `ADMIN_PASSWORD` (checked server-side; the
+> password is never in the page source). Unlock via the dashboard **🔒 Admin**
+> button, or send an `x-admin-password` header. Set `ADMIN_PASSWORD=''` to
+> disable the gate.
 | GET | `/api/swaps` `/api/swarms` `/api/alerts` | recent activity (`?limit=`) |
 | POST | `/api/test-alert` | send a sample alert to every configured channel (verify a new channel instantly) |
 | GET | `/api/performance` | tracked alert outcomes (peak/current return) + win-rate by signal type |

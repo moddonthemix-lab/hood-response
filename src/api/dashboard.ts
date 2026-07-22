@@ -68,6 +68,7 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   <span class="fly">🪰</span>
   <h1>SWARM THE FLY</h1>
   <span id="mode" class="pill">connecting…</span>
+  <button id="admin-btn" class="pill" style="cursor:pointer">🔒 Admin</button>
   <div class="spacer"></div>
   <div class="metrics">
     <span>block <b id="m-block">–</b></span>
@@ -109,12 +110,12 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
     <div class="body"><table id="tokens"><thead><tr><th>Token</th><th class="num">Buys</th><th class="num">Sells</th><th class="num">Swarms</th></tr></thead><tbody></tbody></table></div>
   </section>
 
-  <section class="card full">
+  <section class="card full admin-only" style="display:none">
     <h2>Alert Filters <span class="mono">blue-chip = coins we already track (cashcat, pons, yolo, hmm…)</span></h2>
     <div class="body" id="filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
   </section>
 
-  <section class="card full">
+  <section class="card full admin-only" style="display:none">
     <h2>Wallet Groups <span class="mono" id="muted-note">— click a coin to mute / enable its wallets</span></h2>
     <div class="body" id="groups" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px"><div class="empty">loading…</div></div>
   </section>
@@ -196,17 +197,30 @@ async function loadTables(){
   if(!tokens.length) tb.innerHTML='<tr><td colspan="4" class="empty">no activity yet</td></tr>';
 }
 
+let ADMIN_PW='';
+const adminHeaders=()=>ADMIN_PW?{'x-admin-password':ADMIN_PW}:{};
+
 async function loadFilters(){
-  let f; try{ f=await fetch('/api/filters').then(r=>r.json()); }catch(e){ return; }
+  let f; try{ f=await fetch('/api/filters',{headers:adminHeaders()}).then(r=>r.json()); }catch(e){ return; }
   const el=$('filters'); el.innerHTML='';
   const mk=(label,on,side)=>{ const b=document.createElement('button');
     b.textContent=(on?'🟢 ':'⛔ ')+label+(on?' ON':' OFF');
     b.title=on?'blue-chip '+side+' alert — click to mute':'blue-chip '+side+' muted — click to enable';
     b.style.cssText='cursor:pointer;font:12px inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:'+(on?'#0d2a17':'#2b1113')+';color:'+(on?'var(--green)':'var(--red)');
-    b.onclick=async()=>{ b.disabled=true; await fetch('/api/bluechip/'+side,{method:'POST'}); await loadFilters(); };
+    b.onclick=async()=>{ b.disabled=true; await fetch('/api/bluechip/'+side,{method:'POST',headers:adminHeaders()}); await loadFilters(); };
     return b; };
   el.appendChild(mk('Blue-chip BUYS', f.blueChipBuys, 'buys'));
   el.appendChild(mk('Blue-chip SELLS', f.blueChipSells, 'sells'));
+}
+
+async function unlockAdmin(){
+  const pw=prompt('Enter admin password'); if(!pw) return;
+  let ok=false; try{ ok=(await fetch('/api/admin/verify',{method:'POST',headers:{'x-admin-password':pw}})).ok; }catch(e){}
+  if(!ok){ alert('Wrong password'); return; }
+  ADMIN_PW=pw;
+  document.querySelectorAll('.admin-only').forEach(el=>{ el.style.display=''; });
+  const ab=$('admin-btn'); ab.textContent='🔓 Admin'; ab.disabled=true;
+  await loadFilters(); await loadMuted();
 }
 
 function perfRow(c){
@@ -236,14 +250,14 @@ async function loadPerformance(){
 }
 
 async function loadMuted(){
-  let st; try{ st=await fetch('/api/muted').then(r=>r.json()); }catch(e){ return; }
+  let st; try{ st=await fetch('/api/muted',{headers:adminHeaders()}).then(r=>r.json()); }catch(e){ return; }
   const muted=new Set(st.muted||[]);
   const g=$('groups'); g.innerHTML='';
   for(const sym of (st.groups||[])){ const on=!muted.has(sym);
     const b=document.createElement('button'); b.textContent=(on?'🟢 ':'⛔ ')+sym;
     b.title=on?'wallets active — click to mute':'wallets muted — click to enable';
     b.style.cssText='cursor:pointer;font:12px inherit;padding:5px 11px;border-radius:6px;border:1px solid var(--line);background:'+(on?'#0d2a17':'#2b1113')+';color:'+(on?'var(--green)':'var(--red)');
-    b.onclick=async()=>{ b.disabled=true; await fetch('/api/muted/'+encodeURIComponent(sym),{method:muted.has(sym)?'DELETE':'POST'}); await loadMuted(); };
+    b.onclick=async()=>{ b.disabled=true; await fetch('/api/muted/'+encodeURIComponent(sym),{method:muted.has(sym)?'DELETE':'POST',headers:adminHeaders()}); await loadMuted(); };
     g.appendChild(b);
   }
   if(!(st.groups||[]).length) g.innerHTML='<div class="empty">no tracked coins</div>';
@@ -277,9 +291,8 @@ async function boot(){
   const ae=$('alerts'); if(alerts.length){ clearEmpty(ae); alerts.reverse().forEach(a=>ae.prepend(alertRow(a))); }
 
   await loadTables();
-  await loadFilters();
-  await loadMuted();
   await loadPerformance();
+  $('admin-btn').onclick=unlockAdmin;
   setInterval(loadTables, 8000);
   setInterval(loadPerformance, 30000);
 

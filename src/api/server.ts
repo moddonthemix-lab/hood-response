@@ -158,6 +158,24 @@ export async function buildServer(
     return { deleted: address };
   });
 
+  // ── Admin gate ──────────────────────────────────────────────────────────────
+  // Admin controls (Alert Filters, Wallet Groups) sit behind a password checked
+  // server-side, so the secret is never in the page source and the toggle
+  // endpoints can't be hit without it. Empty ADMIN_PASSWORD disables the gate.
+  const adminOk = (req: { headers: Record<string, unknown>; query?: unknown }): boolean => {
+    if (config.ADMIN_PASSWORD.length === 0) return true;
+    const header = req.headers['x-admin-password'];
+    const fromHeader = typeof header === 'string' ? header : undefined;
+    const fromQuery = (req.query as { pw?: string } | undefined)?.pw;
+    return (fromHeader ?? fromQuery) === config.ADMIN_PASSWORD;
+  };
+  const denyAdmin = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }): unknown =>
+    reply.code(401).send({ error: 'unauthorized' });
+
+  app.post('/api/admin/verify', async (req, reply) =>
+    adminOk(req) ? { ok: true } : denyAdmin(reply),
+  );
+
   // ── Muted wallet groups (turn a coin's wallets off/on at runtime) ──────────────
   const mutedState = () => {
     const muted = [...store.mutedTokens].sort();
@@ -168,28 +186,32 @@ export async function buildServer(
     const groups = [...store.tokensBySymbol.keys()].sort();
     return { muted, mutedWalletCount, groups };
   };
-  app.get('/api/muted', async () => mutedState());
+  app.get('/api/muted', async (req, reply) => (adminOk(req) ? mutedState() : denyAdmin(reply)));
 
   // ── Blue-chip buy/sell filter (weed out whales rotating known coins) ───────────
   const filterState = () => ({ blueChipBuys: store.blueChipBuys, blueChipSells: store.blueChipSells });
-  app.get('/api/filters', async () => filterState());
-  app.post('/api/bluechip/buys', async () => {
+  app.get('/api/filters', async (req, reply) => (adminOk(req) ? filterState() : denyAdmin(reply)));
+  app.post('/api/bluechip/buys', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
     store.blueChipBuys = !store.blueChipBuys;
     logger.info({ blueChipBuys: store.blueChipBuys }, 'toggled blue-chip buys');
     return filterState();
   });
-  app.post('/api/bluechip/sells', async () => {
+  app.post('/api/bluechip/sells', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
     store.blueChipSells = !store.blueChipSells;
     logger.info({ blueChipSells: store.blueChipSells }, 'toggled blue-chip sells');
     return filterState();
   });
-  app.post('/api/muted/:symbol', async (req) => {
+  app.post('/api/muted/:symbol', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
     const sym = (req.params as { symbol: string }).symbol.toUpperCase();
     store.mutedTokens.add(sym);
     logger.info({ symbol: sym }, 'muted wallet group');
     return mutedState();
   });
-  app.delete('/api/muted/:symbol', async (req) => {
+  app.delete('/api/muted/:symbol', async (req, reply) => {
+    if (!adminOk(req)) return denyAdmin(reply);
     const sym = (req.params as { symbol: string }).symbol.toUpperCase();
     store.mutedTokens.delete(sym);
     logger.info({ symbol: sym }, 'unmuted wallet group');

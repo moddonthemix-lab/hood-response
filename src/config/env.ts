@@ -140,6 +140,10 @@ const schema = z.object({
   // alerts focus on new low-caps. Runtime-toggleable via /api/bluechip/*.
   BLUE_CHIP_BUYS: bool(true),
   BLUE_CHIP_SELLS: bool(true),
+  // Password gating the dashboard admin controls (Alert Filters, Wallet Groups)
+  // and their toggle endpoints. Change this in Railway for real security — the
+  // default is a convenience only. Empty disables the admin gate entirely.
+  ADMIN_PASSWORD: z.string().default('abcfly'),
 
   DISCORD_WEBHOOK_URL: z.string().default(''),
   TELEGRAM_BOT_TOKEN: z.string().default(''),
