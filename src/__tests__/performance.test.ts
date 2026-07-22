@@ -7,6 +7,7 @@ function stubPrice(prices: Record<string, number>) {
   return {
     async refreshNow() {},
     priceOf: (addr: string) => prices[addr] ?? 0,
+    isLive: (addr: string) => (prices[addr] ?? 0) > 0,
   } as unknown as import('../chain/price.js').PriceOracle;
 }
 

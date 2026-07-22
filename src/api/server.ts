@@ -189,6 +189,29 @@ export async function buildServer(
     return { enabled: true, summary: performance.summary(), calls: performance.list().slice(0, limit) };
   });
 
+  // CSV snapshot of every tracked call — grab this before a redeploy, since the
+  // outcome data lives in memory and resets when the process restarts.
+  app.get('/api/performance.csv', async (_req, reply) => {
+    const cols = [
+      'symbol', 'kind', 'walletCount', 'repeatCount', 'repeatWallets', 'newHolder',
+      'conviction', 'entryMarketCap', 'entryAt', 'maxGainPct', 'lastGainPct',
+      'gain1hPct', 'gain6hPct', 'gain24hPct', 'token',
+    ];
+    const rows = (performance?.list() ?? []).map((c) =>
+      [
+        c.tokenSymbol, c.kind, c.walletCount, c.repeatCount, c.repeatWallets, c.newHolder,
+        c.conviction, c.entryMarketCap, new Date(c.entryAt).toISOString(), c.maxGainPct,
+        c.lastGainPct, c.gain1hPct ?? '', c.gain6hPct ?? '', c.gain24hPct ?? '', c.token,
+      ]
+        .map((v) => (typeof v === 'string' && v.includes(',') ? `"${v}"` : String(v)))
+        .join(','),
+    );
+    return reply
+      .header('content-type', 'text/csv')
+      .header('content-disposition', 'attachment; filename="swarm-performance.csv"')
+      .send([cols.join(','), ...rows].join('\n'));
+  });
+
   // ── Feeds ────────────────────────────────────────────────────────────────────
   app.get('/api/swaps', async (req) => {
     const limit = clampLimit((req.query as { limit?: string }).limit);
