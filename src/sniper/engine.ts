@@ -295,10 +295,15 @@ export class SniperEngine {
    *  ethIn is set to the current sellable value, so PnL tracks from import. */
   async importPosition(token: string): Promise<Position> {
     if (!this.executor.ready) throw new Error('wallet not connected');
-    if (this.holdsOpen(token)) throw new Error('already tracking this token');
+    // Re-importing an already-tracked token replaces the old record instead of
+    // requiring a separate Untrack step first — the common case is fixing a
+    // stale/incomplete import.
+    for (const [id, p] of this.positions) {
+      if (p.status === 'open' && p.token.toLowerCase() === token.toLowerCase()) this.positions.delete(id);
+    }
     const [{ tokens, ethOut }, meta] = await Promise.all([
       this.executor.valueInEth(token, this.price.pairIdOf(token)),
-      this.executor.tokenMeta(token).catch(() => ({ symbol: token.slice(0, 8), totalSupply: 0 })),
+      this.executor.tokenMeta(token),
     ]);
     // Force a fresh price fetch — this token may never have been priced before
     // (bought directly via the sniper, bypassing normal discovery).
