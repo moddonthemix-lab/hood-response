@@ -208,7 +208,9 @@ export class SniperEngine {
     }
 
     try {
-      const res = await this.executor.buy(swarm.token, size, this.price.pairIdOf(swarm.token));
+      const ethUsd = this.price.ethUsdPrice();
+      const expectedPriceEth = ethUsd && ethUsd > 0 ? entryPrice / ethUsd : null;
+      const res = await this.executor.buy(swarm.token, size, this.price.pairIdOf(swarm.token), expectedPriceEth);
       this.buys.push({ at: now, eth: res.ethSpent });
       const [tax, protocolFeePctPerSwap] = await Promise.all([
         this.lookupTax(swarm.token),
@@ -341,7 +343,9 @@ export class SniperEngine {
     const size = Math.min(config.SNIPER_MAX_ETH_PER_TRADE, Math.max(MIN_BUY_ETH, ethAmount));
     const now = Date.now();
     const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
-    const res = await this.executor.buy(token, size, this.price.pairIdOf(token));
+    const ethUsd = this.price.ethUsdPrice();
+    const expectedPriceEth = px > 0 && ethUsd && ethUsd > 0 ? px / ethUsd : null;
+    const res = await this.executor.buy(token, size, this.price.pairIdOf(token), expectedPriceEth);
     this.buys.push({ at: now, eth: res.ethSpent });
     const [tax, protocolFeePctPerSwap] = await Promise.all([
       this.lookupTax(token),

@@ -73,6 +73,7 @@ const POSM_ABI = [
 ];
 const STATE_VIEW_ABI = [
   'function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)',
+  'function getLiquidity(bytes32 poolId) view returns (uint128 liquidity)',
 ];
 
 export interface BuyResult {
@@ -113,6 +114,29 @@ const abi = AbiCoder.defaultAbiCoder();
 function shortErr(err: unknown): string {
   const e = err as { shortMessage?: string; reason?: string; message?: string };
   return (e.shortMessage || e.reason || e.message || String(err)).slice(0, 90);
+}
+
+/** How far the quoted price may diverge from the alert's known market price
+ *  before a buy is refused outright. A token can have several ETH-paired
+ *  pools — fee-tier variants, or a near-empty pool created moments before a
+ *  snipe specifically to trap bots that trade whatever pool they resolve —
+ *  and quoting/executing against the wrong one can silently cost 90%+ of the
+ *  trade's value even though nothing "reverted". This catches that regardless
+ *  of which pool ends up resolved. */
+export const PRICE_SANITY_MULTIPLE = 3;
+
+/** Null when the quote is within tolerance of the expected market price;
+ *  otherwise a human-readable reason to refuse the buy. Pulled out as a pure
+ *  function so the exact boundary math is unit-testable without ethers. */
+export function checkPriceSanity(
+  quotedPriceEth: number,
+  expectedPriceEth: number,
+  maxMultiple: number = PRICE_SANITY_MULTIPLE,
+): string | null {
+  const ratio = quotedPriceEth / expectedPriceEth;
+  if (ratio <= maxMultiple && ratio >= 1 / maxMultiple) return null;
+  const off = ratio >= 1 ? `${ratio.toFixed(1)}x higher` : `${(1 / ratio).toFixed(1)}x lower`;
+  return `quoted price is ${off} than market — refusing buy (likely a bad/decoy pool)`;
 }
 
 const keyTuple = (p: ResolvedPool) =>
@@ -228,12 +252,40 @@ export class SwapExecutor {
         `token has a pool but it's not ETH/WETH-paired (vs ${found[0]!.ethCurrency.slice(0, 10)}…) — can't buy with ETH`,
       );
     }
-    const pick = ethPaired[ethPaired.length - 1]!;
+    // A token can have several ETH-paired pools (fee-tier variants, or — seen
+    // in the wild — near-empty decoy pools created after the real one). The
+    // most-recently-initialized pool is NOT a reliable proxy for "the real
+    // one": pick by actual on-chain liquidity instead, so a fresh junk pool
+    // can never outrank the pool that's actually being traded.
+    const pick = await this.deepestPool(ethPaired);
     logger.info(
-      { token, pool: { fee: pick.fee, tickSpacing: pick.tickSpacing, hooks: pick.hooks, eth: pick.ethCurrency }, pools: found.length },
+      { token, pool: { fee: pick.fee, tickSpacing: pick.tickSpacing, hooks: pick.hooks, eth: pick.ethCurrency }, pools: found.length, candidates: ethPaired.length },
       'sniper: pool resolved from Initialize event',
     );
     return pick;
+  }
+
+  /** Pick the candidate with the most on-chain liquidity right now (0 for any
+   *  that fail to read). Falls back to the last candidate only if every read
+   *  fails or ties at zero, so a single flaky RPC call can't wrongly demote
+   *  the real pool. */
+  private async deepestPool(candidates: ResolvedPool[]): Promise<ResolvedPool> {
+    if (candidates.length === 1) return candidates[0]!;
+    const sv = new Contract(STATE_VIEW, STATE_VIEW_ABI, this.provider!);
+    const liquidity = await Promise.all(
+      candidates.map(async (p) => {
+        try {
+          return (await sv.getFunction('getLiquidity')(poolIdOf(p))) as bigint;
+        } catch {
+          return 0n;
+        }
+      }),
+    );
+    let best = 0;
+    for (let i = 1; i < candidates.length; i++) {
+      if (liquidity[i]! > liquidity[best]!) best = i;
+    }
+    return liquidity[best]! > 0n ? candidates[best]! : candidates[candidates.length - 1]!;
   }
 
   private buildPool(token: string, eth: string, fee: number, tickSpacing: number, hooks: string): ResolvedPool {
@@ -350,8 +402,8 @@ export class SwapExecutor {
     return amountOut;
   }
 
-  private minOut(quoted: bigint): bigint {
-    const bps = BigInt(Math.round((100 - config.SNIPER_SLIPPAGE_PCT) * 100));
+  private minOut(quoted: bigint, slippagePct: number = config.SNIPER_SLIPPAGE_PCT): bigint {
+    const bps = BigInt(Math.round((100 - slippagePct) * 100));
     return (quoted * bps) / 10_000n;
   }
 
@@ -365,11 +417,18 @@ export class SwapExecutor {
 
   // ── Trades ──────────────────────────────────────────────────────────────────
 
-  async buy(token: string, ethAmount: number, poolIdHint?: string | null): Promise<BuyResult> {
+  async buy(
+    token: string,
+    ethAmount: number,
+    poolIdHint?: string | null,
+    expectedPriceEth?: number | null,
+  ): Promise<BuyResult> {
     this.init();
     if (!this.wallet) throw new Error('sniper wallet not configured');
     const pool = await this.resolvePool(token, poolIdHint);
     const amountIn = parseEther(ethAmount.toString());
+    const token20 = new Contract(token, ERC20_ABI, this.wallet);
+    const decimals = Number((await token20.getFunction('decimals')()) as bigint);
 
     let quoted: bigint;
     try {
@@ -378,6 +437,13 @@ export class SwapExecutor {
       throw new Error(`quote reverted (${shortErr(err)})`);
     }
     if (quoted <= 0n) throw new Error('no route (zero quote)');
+
+    if (expectedPriceEth != null && expectedPriceEth > 0) {
+      const quotedPriceEth = Number(formatEther(amountIn)) / Number(formatUnits(quoted, decimals));
+      const sanityErr = checkPriceSanity(quotedPriceEth, expectedPriceEth, PRICE_SANITY_MULTIPLE);
+      if (sanityErr) throw new Error(sanityErr);
+    }
+
     const amountOutMin = this.minOut(quoted);
     const zeroForOne = !pool.tokenIs0; // ETH side → token
 
@@ -397,7 +463,6 @@ export class SwapExecutor {
       ? [v4Input]
       : [abi.encode(['address', 'uint256'], [ADDRESS_THIS, amountIn]), v4Input];
 
-    const token20 = new Contract(token, ERC20_ABI, this.wallet);
     const before = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
 
     const router = new Contract(config.SNIPER_ROUTER, ROUTER_ABI, this.wallet);
@@ -414,7 +479,6 @@ export class SwapExecutor {
     let tokensReceived = 0;
     try {
       const after = (await token20.getFunction('balanceOf')(this.wallet.address)) as bigint;
-      const decimals = Number((await token20.getFunction('decimals')()) as bigint);
       tokensReceived = Number(formatUnits(after - before, decimals));
     } catch {
       /* balance read failed — tx still landed */
@@ -531,13 +595,35 @@ export class SwapExecutor {
 
     await this.ensurePermit2(token, bal);
 
+    try {
+      return await this.attemptSell(pool, token, bal, decimals, config.SNIPER_SLIPPAGE_PCT);
+    } catch (err) {
+      // A token crashing (or just thin) can move past normal slippage between
+      // the quote and the mined block. Getting out matters more than price
+      // here, so retry ONCE at a much wider tolerance instead of leaving the
+      // position stuck — re-quoting fresh since the price has already moved.
+      logger.warn(
+        { token, err: shortErr(err), retryPct: config.SNIPER_MAX_SELL_SLIPPAGE_PCT },
+        'sniper: sell reverted, retrying at max slippage',
+      );
+      return await this.attemptSell(pool, token, bal, decimals, config.SNIPER_MAX_SELL_SLIPPAGE_PCT);
+    }
+  }
+
+  private async attemptSell(
+    pool: ResolvedPool,
+    token: string,
+    bal: bigint,
+    decimals: number,
+    slippagePct: number,
+  ): Promise<SellResult> {
     let quotedOut = 0n;
     try {
       quotedOut = await this.quoteOut(pool, bal, false);
     } catch (err) {
       throw new Error(`sell quote reverted (${shortErr(err)})`);
     }
-    const amountOutMin = this.minOut(quotedOut);
+    const amountOutMin = this.minOut(quotedOut, slippagePct);
     const zeroForOne = pool.tokenIs0; // token → ETH side
 
     const actions = '0x' + ACT_SWAP_EXACT_IN_SINGLE + ACT_SETTLE_ALL + ACT_TAKE_ALL;
@@ -554,9 +640,9 @@ export class SwapExecutor {
     const commands = nativePool ? CMD_V4_SWAP : concat([CMD_V4_SWAP, CMD_UNWRAP_WETH]);
     const inputs = nativePool
       ? [v4Input]
-      : [v4Input, abi.encode(['address', 'uint256'], [this.wallet.address, amountOutMin])];
+      : [v4Input, abi.encode(['address', 'uint256'], [this.wallet!.address, amountOutMin])];
 
-    const router = new Contract(config.SNIPER_ROUTER, ROUTER_ABI, this.wallet);
+    const router = new Contract(config.SNIPER_ROUTER, ROUTER_ABI, this.wallet!);
     const deadline = Math.floor(Date.now() / 1000) + 120;
     let tx;
     try {
@@ -564,7 +650,7 @@ export class SwapExecutor {
     } catch (err) {
       throw new Error(`sell swap reverted (${shortErr(err)})`);
     }
-    logger.info({ token, tx: tx.hash }, 'sniper: sell sent');
+    logger.info({ token, tx: tx.hash, slippagePct }, 'sniper: sell sent');
     const receipt = await tx.wait(1);
     return {
       txHash: tx.hash,
