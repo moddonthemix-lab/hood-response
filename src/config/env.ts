@@ -109,6 +109,13 @@ const schema = z.object({
   FRESH_ENTRY_ALERTS: bool(true),
   FRESH_PAIR_MAX_AGE_HOURS: num(48),
   FRESH_ENTRY_TIERS: z.string().default('alpha,beta'),
+  // PRIME tier: the loudest alert, reserved for the kind+conviction combo that
+  // actually backtested well (ENTRY @ conviction 80+ averaged a 79% peak gain
+  // vs 52% baseline across 250 tracked calls — see /api/performance history).
+  // Tunable as more outcome data comes in.
+  PRIME_ALERTS: bool(true),
+  PRIME_KINDS: z.string().default('ENTRY'),
+  PRIME_MIN_CONVICTION: num(80),
   ALERT_COOLDOWN_SECONDS: num(120),
   // Repeat/escalation tracking: how many alerts a token has fired inside this
   // rolling window is counted and surfaced ("2nd alert in 35m"), and each
@@ -227,6 +234,11 @@ export const config = {
   freshEntryTiers: env.FRESH_ENTRY_TIERS.split(',')
     .map((t) => t.trim().toLowerCase())
     .filter(Boolean),
+  primeKinds: new Set(
+    env.PRIME_KINDS.split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+  ),
   ignoreSymbols: new Set(
     env.IGNORE_SYMBOLS.split(',')
       .map((s) => s.trim().toUpperCase())

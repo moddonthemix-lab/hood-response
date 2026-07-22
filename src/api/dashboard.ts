@@ -48,6 +48,9 @@ export const DASHBOARD_HTML = /* html */ `<!doctype html>
   .tag.SOLO { background:#2e2405; color:#f0b429; }
   .tag.ENTRY { background:#0d2a17; color:#22c55e; }
   .tag.NEW { background:#3a2a05; color:#f0b429; }
+  .tag.PRIME { background:linear-gradient(90deg,#4a3a00,#6b5200); color:#ffd700; font-weight:800;
+    box-shadow:0 0 0 1px #ffd70055; }
+  .primerow { box-shadow:inset 3px 0 0 #ffd700; }
   .tag.UNSAFE { background:#2b1113; color:var(--red); }
   .tag.WARN { background:#2e2405; color:#d29922; }
   .addr { color:var(--muted); font-size:11px; }
@@ -174,6 +177,7 @@ function feedRow(s){
   return d;
 }
 const newBadge = (s) => s.newToken ? '<span class="tag NEW">NEW</span>' : '';
+const primeBadge = (s) => s.prime ? '<span class="tag PRIME" title="PRIME: kind+conviction combo backed by real outcome data">👑 PRIME</span>' : '';
 const safeBadge = (s) => !s.safety ? '' : (!s.safety.ok ? '<span class="tag UNSAFE" title="'+(s.safety.hardFails||[]).join(', ')+'">RUG?</span>' : ((s.safety.warnings&&s.safety.warnings.length) ? '<span class="tag WARN" title="'+s.safety.warnings.join(', ')+'">⚠</span>' : '<span class="tag" style="color:var(--green)">✓</span>'));
 const momBadge = (s) => (s.momentum && s.momentum.confirmed) ? '<span class="tag" style="color:#f0b429" title="volume+momentum confirmed">🔥</span>' : '';
 const freshBadge = (s) => (s.freshPair && s.kind!=='ENTRY') ? '<span class="tag ENTRY" title="fresh pair">🌱</span>' : '';
@@ -185,9 +189,9 @@ const repeatBadge = (s) => { if(!(s.repeatCount && s.repeatCount>1)) return '';
   return '<span class="tag" style="color:#fff;background:'+bg+'" title="'+title+'">'+label+pc+'</span>'; };
 
 function swarmRow(s){
-  const d=document.createElement('div'); d.className='row flash';
+  const d=document.createElement('div'); d.className='row flash'+(s.prime?' primerow':'');
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+primeBadge(s)+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="usd">'+usd(s.totalUsd)+'</span>'+
@@ -195,9 +199,9 @@ function swarmRow(s){
   return d;
 }
 function alertRow(a){
-  const s=a.swarm; const d=document.createElement('div'); d.className='row flash';
+  const s=a.swarm; const d=document.createElement('div'); d.className='row flash'+(s.prime?' primerow':'');
   const into = s.kind==='ROTATION' ? ' → '+(s.rotatedIntoSymbol||'?') : '';
-  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
+  d.innerHTML='<span class="tag '+s.kind+'">'+s.kind+'</span>'+primeBadge(s)+newBadge(s)+repeatBadge(s)+freshBadge(s)+safeBadge(s)+momBadge(s)+
     '<span class="sym">'+dexA(s.dexUrl,s.tokenSymbol)+into+'</span>'+
     '<span class="grow mono">'+(s.walletSummary||s.walletCount+' wallets')+' · '+mcLabel(s)+'</span>'+
     '<span class="conv '+convClass(s.conviction)+'">'+s.conviction+'</span>'+
