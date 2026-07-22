@@ -30,6 +30,9 @@ export interface Position {
   sellTx?: string;
   exitPriceUsd?: number;
   closeReason?: 'take-profit' | 'manual';
+  /** Per-position take-profit %, overriding the global setting when set.
+   *  null explicitly disables take-profit for this position. */
+  takeProfitPct?: number | null;
 }
 
 /** Runtime-adjustable knobs (seeded from env, editable via the API). */
@@ -206,8 +209,9 @@ export class SniperEngine {
       if (px > 0) {
         p.lastPriceUsd = px;
         p.updatedAt = now;
-        const tp = this.settings.takeProfitPct;
-        if (tp > 0 && (px / p.entryPriceUsd - 1) * 100 >= tp) {
+        // Per-position TP overrides the global one; null explicitly disables it.
+        const tp = p.takeProfitPct !== undefined ? (p.takeProfitPct ?? 0) : this.settings.takeProfitPct;
+        if (tp > 0 && p.entryPriceUsd > 0 && (px / p.entryPriceUsd - 1) * 100 >= tp) {
           await this.takeProfit(p);
         }
       }
@@ -240,6 +244,18 @@ export class SniperEngine {
     const p = this.positions.get(id);
     if (!p || p.status !== 'open') throw new Error('position not open');
     await this.closePosition(p, 'manual');
+    return p;
+  }
+
+  /** Set a per-position take-profit override. A number overrides the global
+   *  setting for this position only; null explicitly disables TP for it;
+   *  undefined clears the override, reverting to the global default. */
+  setPositionTakeProfit(id: string, pct: number | null | undefined): Position {
+    const p = this.positions.get(id);
+    if (!p || p.status !== 'open') throw new Error('position not open');
+    if (pct === undefined) delete p.takeProfitPct;
+    else p.takeProfitPct = pct === null ? null : Math.max(0, pct);
+    void this.persist();
     return p;
   }
 
@@ -301,7 +317,7 @@ export class SniperEngine {
     for (const [id, p] of this.positions) {
       if (p.status === 'open' && p.token.toLowerCase() === token.toLowerCase()) this.positions.delete(id);
     }
-    const [{ tokens, ethOut }, meta] = await Promise.all([
+    const [{ tokens, ethOut: onChainEthOut }, meta] = await Promise.all([
       this.executor.valueInEth(token, this.price.pairIdOf(token)),
       this.executor.tokenMeta(token),
     ]);
@@ -311,6 +327,21 @@ export class SniperEngine {
     const px = this.price.isLive(token) ? this.price.priceOf(token) : 0;
     if (px <= 0) {
       throw new Error('no live price available for this token yet — try again in a few seconds');
+    }
+    // Value the holding from the trusted market price (tokens × USD price ÷ ETH
+    // USD price) rather than the raw on-chain swap quote — a thin/odd v4 route
+    // can quote near-zero even when the token has a real, priced market value.
+    let ethOut = onChainEthOut;
+    try {
+      const weth = config.SNIPER_WETH;
+      await this.price.refreshNow(weth).catch(() => undefined);
+      const ethUsd = this.price.isLive(weth) ? this.price.priceOf(weth) : 0;
+      if (ethUsd > 0) {
+        const marketEthValue = (tokens * px) / ethUsd;
+        if (marketEthValue > onChainEthOut) ethOut = marketEthValue;
+      }
+    } catch {
+      /* fall back to the on-chain quote */
     }
     const now = Date.now();
     const pos: Position = {
