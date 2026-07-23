@@ -69,6 +69,53 @@ describe('PerformanceTracker', () => {
     expect(call.lastGainPct).toBe(50);
   });
 
+  it('emits a milestone event the first time peak crosses each 50% interval', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const perf = new PerformanceTracker(stubPrice(prices));
+    perf.track(swarm({ token: '0xtok', priceUsd: 1 }));
+    const seen: number[] = [];
+    perf.on('milestone', ({ milestonePct }: { milestonePct: number }) => seen.push(milestonePct));
+
+    // @ts-expect-error exercise the private sampler directly.
+    prices['0xtok'] = 1.4; await perf.sample(); // +40% — no milestone yet
+    expect(seen).toEqual([]);
+
+    // @ts-expect-error
+    prices['0xtok'] = 1.6; await perf.sample(); // +60% — crosses 50
+    expect(seen).toEqual([50]);
+
+    // @ts-expect-error
+    prices['0xtok'] = 1.6; await perf.sample(); // flat — no new peak, no re-fire
+    expect(seen).toEqual([50]);
+  });
+
+  it('announces every interval a big jump passes through, not just the top one', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const perf = new PerformanceTracker(stubPrice(prices));
+    perf.track(swarm({ token: '0xtok', priceUsd: 1 }));
+    const seen: number[] = [];
+    perf.on('milestone', ({ milestonePct }: { milestonePct: number }) => seen.push(milestonePct));
+
+    // @ts-expect-error exercise the private sampler directly.
+    prices['0xtok'] = 3.3; await perf.sample(); // +230% in one jump
+    expect(seen).toEqual([50, 100, 150, 200]);
+  });
+
+  it('milestone payload carries a snapshot of the call, including its wallet labels', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const perf = new PerformanceTracker(stubPrice(prices));
+    perf.track(swarm({ token: '0xtok', priceUsd: 1, tokenSymbol: 'GEM', walletLabels: ['tendies'] }));
+    let payload: { call: { tokenSymbol: string; walletLabels: string[] }; milestonePct: number } | null = null;
+    perf.on('milestone', (p: typeof payload) => { payload = p; });
+
+    // @ts-expect-error exercise the private sampler directly.
+    prices['0xtok'] = 1.6; await perf.sample(); // +60% — a single crossing of 50
+    expect(payload).not.toBeNull();
+    expect(payload!.call.tokenSymbol).toBe('GEM');
+    expect(payload!.call.walletLabels).toEqual(['tendies']);
+    expect(payload!.milestonePct).toBe(50);
+  });
+
   it('summary buckets by wallet count and repeat, with a win rate', async () => {
     const prices: Record<string, number> = { '0xwin': 1, '0xflat': 1 };
     const perf = new PerformanceTracker(stubPrice(prices));

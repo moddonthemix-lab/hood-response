@@ -7,9 +7,9 @@ import { Aggregator } from './engine/aggregator.js';
 import { AlertEngine } from './engine/alertEngine.js';
 import { attachPersistence } from './store/persistence.js';
 import { buildServer } from './api/server.js';
-import { configuredChannels } from './notify/index.js';
+import { configuredChannels, dispatchMilestone } from './notify/index.js';
 import { SafetyChecker } from './chain/safety.js';
-import { PerformanceTracker } from './engine/performance.js';
+import { PerformanceTracker, type TrackedCall } from './engine/performance.js';
 import { SniperEngine } from './sniper/engine.js';
 import type { Swarm, SwapEvent } from './types.js';
 
@@ -36,6 +36,9 @@ async function main(): Promise<void> {
   const performance = new PerformanceTracker(price);
   await performance.load();
   performance.start();
+  performance.on('milestone', ({ call, milestonePct }: { call: TrackedCall; milestonePct: number }) => {
+    void dispatchMilestone(call, milestonePct, price.dexUrl(call.token));
+  });
 
   // Sniper: auto-buy qualifying alerts with a server hot wallet (off by default).
   const sniper = new SniperEngine(price);
