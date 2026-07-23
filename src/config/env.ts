@@ -142,6 +142,12 @@ const schema = z.object({
   PERF_AUTO_RESET: bool(true),
   PERF_RESET_HOUR: num(8),
   PERF_RESET_TZ: z.string().default('America/New_York'),
+  // PnL milestone cards: fire a celebratory alert to every notification
+  // channel each time a tracked call's peak return crosses a new interval
+  // (default every 50%: +50%, +100%, +150%, …). A big jump between samples
+  // announces every interval it passed through, not just the top one.
+  PERF_MILESTONES_ENABLED: bool(true),
+  PERF_MILESTONE_STEP_PCT: num(50),
   IGNORE_DUST_USD: num(25),
   IGNORE_STABLECOINS: bool(true),
   // Symbols never treated as gems: settlement/quote tokens (so a "buy with WETH"

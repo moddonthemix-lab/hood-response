@@ -1,4 +1,5 @@
 import type { Swarm } from '../types.js';
+import type { TrackedCall } from '../engine/performance.js';
 import { explorerUrl, sigmaBuyUrl, basedBuyUrl } from '../links.js';
 
 export const KIND_EMOJI: Record<Swarm['kind'], string> = {
@@ -195,5 +196,59 @@ export function telegramHtml(s: Swarm): string {
     `<code>${esc(s.token)}</code>\n` +
     `📊 <a href="${esc(s.dexUrl)}">Chart</a>  ·  🔎 <a href="${esc(explorerUrl(s.token))}">Explorer</a>` +
     (buyLinks.length ? `\n${buyLinks.join('  ·  ')}` : '')
+  );
+}
+
+// ── PnL milestone cards ─────────────────────────────────────────────────────
+// Fired by PerformanceTracker every time a tracked call's peak crosses a new
+// interval (default 50%: +50%, +100%, +150%, …) — a running celebration of
+// which calls actually turned into runners, not just what fired at entry.
+
+/** More rockets the bigger the milestone — same "the swarm gets bigger"
+ *  language as PRIME, applied to realized gain instead of entry conviction. */
+function milestoneBanner(milestonePct: number): string {
+  const tier = Math.max(1, Math.min(6, Math.floor(milestonePct / 50)));
+  return '🚀'.repeat(tier);
+}
+
+export function milestoneHeadline(call: TrackedCall, milestonePct: number): string {
+  const rockets = milestoneBanner(milestonePct);
+  return `${rockets} +${milestonePct}% — $${call.tokenSymbol} ${rockets}`;
+}
+
+function milestoneLines(call: TrackedCall, milestonePct: number): string[] {
+  const ageMin = Math.floor((Date.now() - call.entryAt) / 60_000);
+  const age = ageMin < 60 ? `${ageMin}m` : `${Math.floor(ageMin / 60)}h`;
+  const lines: string[] = [
+    `🪰 $${call.tokenSymbol} just crossed +${milestonePct}% peak`,
+    `💎 Entry ${compact(call.entryMarketCap)} MC → now ${compact(call.lastMarketCap)} MC`,
+    `📈 Currently ${call.lastGainPct >= 0 ? '+' : ''}${call.lastGainPct}% vs entry`,
+    `⏳ ${age} since the call · pair was ${fmtAge(call.pairAgeHours)} old`,
+    `🐝 Conviction ${call.conviction}/100 · ${call.kind}`,
+  ];
+  if (call.walletLabels.length) lines.push(`👛 Called by: ${call.walletLabels.join(', ')}`);
+  return lines;
+}
+
+export function milestoneTextBody(call: TrackedCall, milestonePct: number, dexUrl: string): string {
+  const lines = [
+    milestoneHeadline(call, milestonePct),
+    ``,
+    ...milestoneLines(call, milestonePct),
+    ``,
+    call.token,
+    `📊 Chart: ${dexUrl}`,
+    `🔎 Explorer: ${explorerUrl(call.token)}`,
+  ];
+  return lines.join('\n');
+}
+
+export function milestoneTelegramHtml(call: TrackedCall, milestonePct: number, dexUrl: string): string {
+  const body = milestoneLines(call, milestonePct).map(esc).join('\n');
+  return (
+    `<b>${esc(milestoneHeadline(call, milestonePct))}</b>\n\n` +
+    `${body}\n\n` +
+    `<code>${esc(call.token)}</code>\n` +
+    `📊 <a href="${esc(dexUrl)}">Chart</a>  ·  🔎 <a href="${esc(explorerUrl(call.token))}">Explorer</a>`
   );
 }

@@ -1,7 +1,16 @@
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { NotificationDelivery, Swarm } from '../types.js';
-import { headline, telegramHtml, textBody, usd } from './format.js';
+import type { TrackedCall } from '../engine/performance.js';
+import {
+  headline,
+  telegramHtml,
+  textBody,
+  usd,
+  milestoneHeadline,
+  milestoneTelegramHtml,
+  milestoneTextBody,
+} from './format.js';
 import { explorerUrl, sigmaBuyUrl, basedBuyUrl } from '../links.js';
 
 const TIMEOUT_MS = 4000;
@@ -152,6 +161,119 @@ export async function dispatch(s: Swarm): Promise<NotificationDelivery[]> {
   const results = await Promise.all(jobs);
   for (const r of results) {
     if (!r.ok) logger.warn({ channel: r.channel, detail: r.detail }, 'notification failed');
+  }
+  return results;
+}
+
+// ── PnL milestone cards ─────────────────────────────────────────────────────
+
+async function sendMilestoneDiscord(
+  url: string,
+  call: TrackedCall,
+  milestonePct: number,
+  dexUrl: string,
+): Promise<NotificationDelivery> {
+  const embed = {
+    title: milestoneHeadline(call, milestonePct),
+    url: dexUrl,
+    color: 0xffd700, // gold — a celebration card, same tone as PRIME
+    fields: [
+      { name: 'Peak', value: `+${milestonePct}%`, inline: true },
+      { name: 'Now', value: `${call.lastGainPct >= 0 ? '+' : ''}${call.lastGainPct}%`, inline: true },
+      { name: 'Entry MC → Now', value: `${usd(call.entryMarketCap)} → ${usd(call.lastMarketCap)}`, inline: true },
+      { name: 'Conviction', value: `${call.conviction}/100`, inline: true },
+      ...(call.walletLabels.length
+        ? [{ name: 'Called by', value: call.walletLabels.join(', '), inline: true }]
+        : []),
+      { name: 'Links', value: `[📊 Chart](${dexUrl}) · [🔎 Explorer](${explorerUrl(call.token)})`, inline: true },
+    ],
+    footer: { text: 'Swarm the Fly · PnL milestone' },
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    const res = await postJson(url, { username: 'Swarm the Fly', embeds: [embed] });
+    return delivery('discord', res.ok, res.ok ? undefined : `HTTP ${res.status}`);
+  } catch (err) {
+    return delivery('discord', false, (err as Error).message);
+  }
+}
+
+async function sendMilestoneTelegram(
+  token: string,
+  chatId: string,
+  call: TrackedCall,
+  milestonePct: number,
+  dexUrl: string,
+): Promise<NotificationDelivery> {
+  try {
+    const res = await postJson(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text: milestoneTelegramHtml(call, milestonePct, dexUrl),
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    });
+    if (res.ok) return delivery('telegram', true);
+    const reason = await res
+      .json()
+      .then((b) => (b as { description?: string }).description ?? `HTTP ${res.status}`)
+      .catch(() => `HTTP ${res.status}`);
+    return delivery('telegram', false, reason);
+  } catch (err) {
+    return delivery('telegram', false, (err as Error).message);
+  }
+}
+
+async function sendMilestoneWebhook(
+  url: string,
+  call: TrackedCall,
+  milestonePct: number,
+  dexUrl: string,
+): Promise<NotificationDelivery> {
+  try {
+    const res = await postJson(url, {
+      type: 'performance.milestone',
+      text: milestoneTextBody(call, milestonePct, dexUrl),
+      milestonePct,
+      call,
+    });
+    return delivery('webhook', res.ok, res.ok ? undefined : `HTTP ${res.status}`);
+  } catch (err) {
+    return delivery('webhook', false, (err as Error).message);
+  }
+}
+
+/**
+ * Fan a PnL milestone out to every configured channel in parallel, same
+ * shape as dispatch() for swarm alerts. Called by PerformanceTracker's
+ * 'milestone' event each time a tracked call's peak crosses a new interval.
+ */
+export async function dispatchMilestone(
+  call: TrackedCall,
+  milestonePct: number,
+  dexUrl: string,
+): Promise<NotificationDelivery[]> {
+  const jobs: Promise<NotificationDelivery>[] = [];
+  if (config.notifications.discord) {
+    jobs.push(sendMilestoneDiscord(config.notifications.discord, call, milestonePct, dexUrl));
+  }
+  if (config.notifications.telegram) {
+    jobs.push(
+      sendMilestoneTelegram(
+        config.notifications.telegram.token,
+        config.notifications.telegram.chatId,
+        call,
+        milestonePct,
+        dexUrl,
+      ),
+    );
+  }
+  if (config.notifications.webhook) {
+    jobs.push(sendMilestoneWebhook(config.notifications.webhook, call, milestonePct, dexUrl));
+  }
+  if (jobs.length === 0) return [];
+  const results = await Promise.all(jobs);
+  for (const r of results) {
+    if (!r.ok) logger.warn({ channel: r.channel, detail: r.detail }, 'milestone notification failed');
   }
   return results;
 }

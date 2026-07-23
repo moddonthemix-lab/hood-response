@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { EventEmitter } from 'node:events';
 import { config } from '../config/env.js';
 import { logger } from '../logger.js';
 import type { PriceOracle } from '../chain/price.js';
@@ -39,6 +40,9 @@ export interface TrackedCall {
   /** Best return seen since the alert (%). */
   maxGainPct: number;
   maxGainAt: number;
+  /** Highest 50%-interval milestone already announced (0 = none yet), so a
+   *  restart or a flat tick never re-fires the same milestone card. */
+  lastMilestoneAnnounced: number;
   /** Milestone returns (%), filled as the token ages past each mark. */
   gain1hPct: number | null;
   gain6hPct: number | null;
@@ -146,15 +150,19 @@ function bucket(label: string, calls: TrackedCall[], winThreshold: number): Buck
  * signal quality can be measured from real outcomes instead of guessed. The
  * summary breaks results down by the dimensions that matter for catching
  * runners — multi-wallet vs solo, and repeat vs single — so the operator can
- * see which setups pay.
+ * see which setups pay. Emits `'milestone'` with `{ call, milestonePct }`
+ * each time a call's peak return crosses a new PERF_MILESTONE_STEP_PCT
+ * interval, for the notification layer to turn into a PnL card.
  */
-export class PerformanceTracker {
+export class PerformanceTracker extends EventEmitter {
   private readonly calls = new Map<string, TrackedCall>();
   private timer: NodeJS.Timeout | null = null;
   private soonTimer: NodeJS.Timeout | null = null;
   private resetTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly price: PriceOracle) {}
+  constructor(private readonly price: PriceOracle) {
+    super();
+  }
 
   /** Register a fired alert for follow-up. No-op unless we have a live entry
    *  price (synthetic prices can't be measured against the market). */
@@ -186,6 +194,7 @@ export class PerformanceTracker {
       maxPrice: entryPrice,
       maxGainPct: 0,
       maxGainAt: now,
+      lastMilestoneAnnounced: 0,
       gain1hPct: null,
       gain6hPct: null,
       gain24hPct: null,
@@ -276,6 +285,7 @@ export class PerformanceTracker {
           c.maxPrice = p;
           c.maxGainPct = gainPct(c.entryPrice, p);
           c.maxGainAt = now;
+          this.announceMilestones(c);
         }
       }
       const age = now - c.entryAt;
@@ -286,6 +296,21 @@ export class PerformanceTracker {
       c.updatedAt = now;
     }
     void this.persist();
+  }
+
+  /** Emit one `'milestone'` event per PERF_MILESTONE_STEP_PCT interval newly
+   *  crossed by this call's peak return — a jump that skips several intervals
+   *  between samples still announces each one, not just the highest. */
+  private announceMilestones(c: TrackedCall): void {
+    if (!config.PERF_MILESTONES_ENABLED) return;
+    const step = config.PERF_MILESTONE_STEP_PCT;
+    if (step <= 0) return;
+    const reached = Math.floor(c.maxGainPct / step) * step;
+    const last = c.lastMilestoneAnnounced ?? 0;
+    for (let m = last + step; m <= reached; m += step) {
+      c.lastMilestoneAnnounced = m;
+      this.emit('milestone', { call: { ...c }, milestonePct: m });
+    }
   }
 
   /** Load a previously persisted snapshot so redeploys don't lose outcome data.
