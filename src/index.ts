@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   );
 
   const store = new MemoryStore();
+  await store.loadSettings();
   const price = new PriceOracle([...store.tokensByAddress.values()], store);
   price.start();
   const aggregator = new Aggregator(store, price);

@@ -89,6 +89,33 @@ describe('PerformanceTracker', () => {
     expect(seen).toEqual([50]);
   });
 
+  it('never fires on the way down — only a NEW peak can announce a milestone', async () => {
+    const prices: Record<string, number> = { '0xtok': 1 };
+    const perf = new PerformanceTracker(stubPrice(prices));
+    perf.track(swarm({ token: '0xtok', priceUsd: 1 }));
+    const seen: number[] = [];
+    perf.on('milestone', ({ milestonePct }: { milestonePct: number }) => seen.push(milestonePct));
+
+    // @ts-expect-error exercise the private sampler directly.
+    prices['0xtok'] = 1.6; await perf.sample(); // +60% — crosses 50, fires once
+    expect(seen).toEqual([50]);
+
+    // Price crashes back toward entry, then partially recovers — but never
+    // exceeds the prior peak (1.6), so no milestone (up OR down) should fire.
+    // @ts-expect-error
+    prices['0xtok'] = 0.5; await perf.sample(); // -50% — a real drop
+    // @ts-expect-error
+    prices['0xtok'] = 1.2; await perf.sample(); // recovering, still below peak
+    // @ts-expect-error
+    prices['0xtok'] = 1.59; await perf.sample(); // right up to the old peak, not past it
+    expect(seen).toEqual([50]);
+
+    // Only once it breaks the OLD peak and reaches new ground does it fire again.
+    // @ts-expect-error
+    prices['0xtok'] = 2.1; await perf.sample(); // +110% — new peak, crosses 100
+    expect(seen).toEqual([50, 100]);
+  });
+
   it('announces every interval a big jump passes through, not just the top one', async () => {
     const prices: Record<string, number> = { '0xtok': 1 };
     const perf = new PerformanceTracker(stubPrice(prices));
