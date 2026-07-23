@@ -11,6 +11,7 @@ import { configuredChannels, dispatchMilestone } from './notify/index.js';
 import { SafetyChecker } from './chain/safety.js';
 import { PerformanceTracker, type TrackedCall } from './engine/performance.js';
 import { SniperEngine } from './sniper/engine.js';
+import { TelegramCommands } from './telegram/commands.js';
 import type { Swarm, SwapEvent } from './types.js';
 
 async function main(): Promise<void> {
@@ -45,6 +46,10 @@ async function main(): Promise<void> {
   const sniper = new SniperEngine(price);
   await sniper.load();
   sniper.start();
+
+  // Inbound Telegram commands (/t5, /t10, /l5) answered from live performance data.
+  const telegramCommands = new TelegramCommands(performance);
+  telegramCommands.start();
 
   store.on('alert', (a) => {
     performance.track(a.swarm);
@@ -246,6 +251,7 @@ async function main(): Promise<void> {
     price.stop();
     performance.stop();
     sniper.stop();
+    telegramCommands.stop();
     await performance.flush().catch(() => undefined);
     await sniper.flush().catch(() => undefined);
     await app.close().catch(() => undefined);
