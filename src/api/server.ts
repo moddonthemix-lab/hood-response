@@ -208,12 +208,14 @@ export async function buildServer(
     if (!adminOk(req)) return denyAdmin(reply);
     store.blueChipBuys = !store.blueChipBuys;
     logger.info({ blueChipBuys: store.blueChipBuys }, 'toggled blue-chip buys');
+    void store.saveSettings();
     return filterState();
   });
   app.post('/api/bluechip/sells', async (req, reply) => {
     if (!adminOk(req)) return denyAdmin(reply);
     store.blueChipSells = !store.blueChipSells;
     logger.info({ blueChipSells: store.blueChipSells }, 'toggled blue-chip sells');
+    void store.saveSettings();
     return filterState();
   });
   app.post('/api/muted/:symbol', async (req, reply) => {
@@ -221,6 +223,7 @@ export async function buildServer(
     const sym = (req.params as { symbol: string }).symbol.toUpperCase();
     store.mutedTokens.add(sym);
     logger.info({ symbol: sym }, 'muted wallet group');
+    void store.saveSettings();
     return mutedState();
   });
   app.delete('/api/muted/:symbol', async (req, reply) => {
@@ -228,6 +231,7 @@ export async function buildServer(
     const sym = (req.params as { symbol: string }).symbol.toUpperCase();
     store.mutedTokens.delete(sym);
     logger.info({ symbol: sym }, 'unmuted wallet group');
+    void store.saveSettings();
     return mutedState();
   });
 

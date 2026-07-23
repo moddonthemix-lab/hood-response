@@ -172,6 +172,10 @@ const schema = z.object({
   // alerts focus on new low-caps. Runtime-toggleable via /api/bluechip/*.
   BLUE_CHIP_BUYS: bool(true),
   BLUE_CHIP_SELLS: bool(true),
+  // Persist Wallet Groups (mute) + Blue Chip filter toggles so they survive a
+  // redeploy instead of resetting to the env defaults above. Point at a
+  // mounted Railway Volume (e.g. /data/settings.json); empty = in-memory only.
+  STORE_SETTINGS_PATH: z.string().default(''),
   // Password gating the dashboard admin controls (Alert Filters, Wallet Groups)
   // and their toggle endpoints. Change this in Railway for real security — the
   // default is a convenience only. Empty disables the admin gate entirely.

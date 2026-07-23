@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import type {
   Alert,
   AlertRule,
@@ -9,6 +11,13 @@ import type {
 } from '../types.js';
 import { SEED_TOKENS, SEED_WALLETS } from '../data/seed.js';
 import { config } from '../config/env.js';
+import { logger } from '../logger.js';
+
+interface PersistedSettings {
+  mutedTokens: string[];
+  blueChipBuys: boolean;
+  blueChipSells: boolean;
+}
 
 /** Fixed-size ring buffer of the most recent items. */
 class Ring<T> {
@@ -94,6 +103,52 @@ export class MemoryStore extends EventEmitter {
     }
     for (const w of SEED_WALLETS) this.wallets.set(w.address, w);
     for (const sym of config.mutedWalletTokens) this.mutedTokens.add(sym.toUpperCase());
+  }
+
+  /** Restore Wallet Groups (mute) + Blue Chip filter settings from disk, so
+   *  toggles made on the dashboard survive a redeploy instead of resetting to
+   *  the MUTE_WALLET_TOKENS/BLUE_CHIP_* env defaults every restart. No-op
+   *  unless STORE_SETTINGS_PATH is set (point it at a mounted Railway Volume). */
+  async loadSettings(): Promise<void> {
+    if (!config.STORE_SETTINGS_PATH) return;
+    logger.info({ path: config.STORE_SETTINGS_PATH }, 'store: settings persistence enabled');
+    try {
+      const raw = await readFile(config.STORE_SETTINGS_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+      if (Array.isArray(parsed.mutedTokens)) {
+        this.mutedTokens.clear();
+        for (const sym of parsed.mutedTokens) this.mutedTokens.add(String(sym).toUpperCase());
+      }
+      if (typeof parsed.blueChipBuys === 'boolean') this.blueChipBuys = parsed.blueChipBuys;
+      if (typeof parsed.blueChipSells === 'boolean') this.blueChipSells = parsed.blueChipSells;
+      logger.info(
+        { muted: this.mutedTokens.size, blueChipBuys: this.blueChipBuys, blueChipSells: this.blueChipSells },
+        'store: restored settings',
+      );
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== 'ENOENT') logger.warn({ err: String(err) }, 'store: could not load settings');
+    }
+  }
+
+  /** Atomically persist Wallet Groups + Blue Chip settings (temp file + rename).
+   *  No-op unless STORE_SETTINGS_PATH is set. */
+  async saveSettings(): Promise<void> {
+    if (!config.STORE_SETTINGS_PATH) return;
+    const path = config.STORE_SETTINGS_PATH;
+    const data: PersistedSettings = {
+      mutedTokens: [...this.mutedTokens],
+      blueChipBuys: this.blueChipBuys,
+      blueChipSells: this.blueChipSells,
+    };
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      const tmp = `${path}.tmp`;
+      await writeFile(tmp, JSON.stringify(data));
+      await rename(tmp, path);
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'store: could not save settings');
+    }
   }
 
   isTracked(wallet: string): boolean {
